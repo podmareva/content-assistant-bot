@@ -121,6 +121,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.edit_message_text("🖊️ Я копирайтер! Чем помочь?", reply_markup=InlineKeyboardMarkup(kb))
         sessions[user_id]["state"] = "copywriter_mode"
+        
+    # === Подменю задач копирайтера ===
+    elif query.data.startswith("copy_"):
+        task = query.data.split("_", 1)[1]
+        sessions[user_id]["state"] = f"copywriter_{task}"
+        sessions[user_id]["task"] = task
+        await query.edit_message_text(
+            f"✍️ Отлично! Ты выбрал задачу: *{task}*.\n\n"
+            "1️⃣ Укажи цель текста (продажа, вовлечение, лид-магнит, упаковка).",
+            parse_mode="Markdown"
+        )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -146,6 +157,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Ты хочешь отправить дополнительную информацию по ЦА?",
                                             reply_markup=InlineKeyboardMarkup(kb))
             session["state"] = "awaiting_extra_question"
+            
+    # === Диалог копирайтера ===
+elif session.get("state", "").startswith("copywriter_"):
+    step = session.get("step", 0)
+    task = session.get("task")
+    session.setdefault("copy_data", [])
+
+    session["copy_data"].append(text)
+    step += 1
+    session["step"] = step
+
+    if step == 1:
+        await update.message.reply_text("2️⃣ Укажи тему текста (например: продвижение курса, экспертная статья).")
+    elif step == 2:
+        await update.message.reply_text("3️⃣ Укажи тональность (экспертная, дружелюбная, дерзкая).")
+    elif step == 3:
+        # Все данные собраны — отправляем запрос к OpenAI
+        goal, topic, tone = session["copy_data"]
+        await update.message.reply_text("✍️ Пишу текст, подожди...")
+
+        try:
+            prompt = (
+                f"Ты профессиональный копирайтер. Напиши {task}.\n"
+                f"🎯 Цель: {goal}\n📌 Тема: {topic}\n🎨 Тональность: {tone}\n"
+                "Пиши цепко, без воды, в стиле 2024."
+            )
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            result = response["choices"][0]["message"]["content"]
+            await update.message.reply_text(result)
+        except Exception as e:
+            await update.message.reply_text("⚠️ Ошибка при генерации текста.")
+            print("OpenAI Error:", e)
+
+        # Сбрасываем состояние
+        session["state"] = "roles_menu"
+        session["step"] = 0
+        session["copy_data"] = []
+        kb = [[InlineKeyboardButton("Вернуться в меню ролей", callback_data="roles_menu")]]
+        await update.message.reply_text("✅ Готово! Выбери новую задачу:", reply_markup=InlineKeyboardMarkup(kb))    
 
     elif session.get("state") == "waiting_extra_info":
         session["data"]["extra_info"] = text
