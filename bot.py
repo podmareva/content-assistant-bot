@@ -23,46 +23,81 @@ os.environ["RUNNING_BOT"] = "1"
 
 sessions = {}
 
+# Вопросы для сбора информации
+INFO_QUESTIONS = [
+    ("Пришли, пожалуйста, свою распаковку личности и экспертности.\n"
+     "💡 *Распаковка* — это описание твоих ценностей, опыта и уникальности."),
+    ("Супер! Благодарю! Теперь пришли своё позиционирование.\n"
+     "💡 *Позиционирование* — это краткое объяснение, чем ты занимаешься и для кого."),
+    ("Отлично! Теперь пришли краткую характеристику продукта/услуги.\n"
+     "💡 Опиши, что ты предлагаешь, чем это полезно клиенту."),
+    ("Супер! Теперь пришли анализ твоей ЦА.\n"
+     "💡 Опиши, кто твоя аудитория, их боли, страхи, желания.")
+]
+
 # ---------- ПРИВЕТСТВИЕ ----------
 WELCOME = (
-    "👋 Привет! Ты в боте «Контент-ассистент».\n\n"
-    "Он поможет:\n"
-    "• создать контент-стратегию\n"
-    "• написать контент-план\n"
-    "• написать пост\n"
-    "• создать сценарий для Reels или Stories\n\n"
-    "🔐 Подтверди согласие с политикой и начнем!"
+    "👋 Привет! Ты в боте «Контент-ассистент». Он поможет:\n"
+    "• создать контент-стратегию;\n"
+    "• написать контент-план;\n"
+    "• написать или отредактировать пост;\n"
+    "• создать сценарий для Reels или Stories.\n\n"
+    "🔐 Чтобы начать, подтверди согласие с "
+    "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true) и "
+    "[Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true).\n\n"
+    "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!"
 )
 
 # ==== ХЕНДЛЕРЫ ====
 
-# /start → приветствие
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-    await update.message.reply_text(WELCOME, reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(WELCOME, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-# Обработка нажатий кнопок
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user_id = query.from_user.id
-    sessions.setdefault(user_id, {"state": None, "data": {}})
+    sessions.setdefault(user_id, {"state": None, "data": {}, "step": 0})
 
-    # Согласие → спрашиваем про основу
+    # Пользователь согласился
     if query.data == "agree":
         kb = [
             [InlineKeyboardButton("ДА ✅", callback_data="base_yes")],
             [InlineKeyboardButton("НЕТ ❌", callback_data="base_no")]
         ]
-        await query.edit_message_text(
-            "Есть ли у тебя уже основа (распаковка, позиционирование, анализ ЦА)?",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+        await query.edit_message_text("Есть ли у тебя уже основа (распаковка, позиционирование, анализ ЦА)?",
+                                      reply_markup=InlineKeyboardMarkup(kb))
 
-    elif query.data in ["base_yes", "base_no"]:
-        sessions[user_id]["state"] = "collecting_base"
-        await query.edit_message_text("Отлично! Пришли информацию о себе (распаковка личности).")
+    # Если у пользователя НЕТ основы
+    elif query.data == "base_no":
+        kb = [
+            [InlineKeyboardButton("Использовать бота «Твоя распаковка и анализ ЦА»", callback_data="use_other_bot")],
+            [InlineKeyboardButton("Заполнить данные здесь", callback_data="fill_here")]
+        ]
+        await query.edit_message_text("❗ Хорошо! У тебя два варианта:\n"
+                                      "1️⃣ Воспользоваться отдельным ботом для распаковки (пока заглушка)\n"
+                                      "2️⃣ Заполнить данные прямо здесь",
+                                      reply_markup=InlineKeyboardMarkup(kb))
+
+    elif query.data == "use_other_bot":
+        await query.edit_message_text("🤖 [Ссылка на бота по распаковке] (в разработке).")
+
+    elif query.data == "fill_here":
+        sessions[user_id]["state"] = "collecting_info"
+        sessions[user_id]["step"] = 0
+        await query.edit_message_text(INFO_QUESTIONS[0], parse_mode="Markdown")
+
+    # После анализа ЦА → спрашиваем про доп.инфо
+    elif query.data == "add_extra_info":
+        await query.edit_message_text("✍️ Тогда жду дополнительную информацию по ЦА. Отправь её одним сообщением.")
+        sessions[user_id]["state"] = "waiting_extra_info"
+
+    elif query.data == "no_extra_info":
+        sessions[user_id]["state"] = "roles_menu"
+        kb = [[InlineKeyboardButton("Перейти в меню ролей", callback_data="roles_menu")]]
+        await query.edit_message_text("✅ Отлично! Полная информация получена. Сейчас подготовлю контент-стратегию.",
+                                      reply_markup=InlineKeyboardMarkup(kb))
 
     # Меню ролей
     elif query.data == "roles_menu":
@@ -73,8 +108,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🎬 Продюсер Reels", callback_data="role_reels")]
         ]
         await query.edit_message_text("Выбери, чем я могу помочь:", reply_markup=InlineKeyboardMarkup(kb))
+        sessions[user_id]["state"] = "menu_roles"
 
-    # Выбор роли → копирайтер
+    # Роль копирайтера
     elif query.data == "role_copywriter":
         kb = [
             [InlineKeyboardButton("Написать пост", callback_data="copy_post")],
@@ -86,25 +122,39 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🖊️ Я копирайтер! Чем помочь?", reply_markup=InlineKeyboardMarkup(kb))
         sessions[user_id]["state"] = "copywriter_mode"
 
-# Обработка текстов → сбор данных или генерация
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
     session = sessions.get(user_id, {})
 
-    # Если пользователь заполняет основу
-    if session.get("state") == "collecting_base":
-        session["data"].setdefault("base_info", []).append(text)
+    # === Пошаговый сбор данных ===
+    if session.get("state") == "collecting_info":
+        step = session.get("step", 0)
+        session["data"].setdefault("info", []).append(text)
 
-        # После нескольких сообщений → показываем меню ролей
-        if len(session["data"]["base_info"]) >= 3:
-            session["state"] = "menu_roles"
-            kb = [[InlineKeyboardButton("Перейти в меню ролей", callback_data="roles_menu")]]
-            await update.message.reply_text("✅ Спасибо! Базовая информация собрана.", reply_markup=InlineKeyboardMarkup(kb))
+        # Переход к следующему шагу
+        step += 1
+        if step < len(INFO_QUESTIONS):
+            session["step"] = step
+            await update.message.reply_text(f"👍 Отлично! {INFO_QUESTIONS[step]}", parse_mode="Markdown")
         else:
-            await update.message.reply_text("Отлично! Пришли ещё немного информации...")
+            # После анализа ЦА → спрашиваем про дополнительную информацию
+            kb = [
+                [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
+                [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]
+            ]
+            await update.message.reply_text("Ты хочешь отправить дополнительную информацию по ЦА?",
+                                            reply_markup=InlineKeyboardMarkup(kb))
+            session["state"] = "awaiting_extra_question"
 
-    # Если копирайтер → генерируем текст
+    elif session.get("state") == "waiting_extra_info":
+        session["data"]["extra_info"] = text
+        await update.message.reply_text("✅ Отлично! Полная информация получена. Сейчас подготовлю контент-стратегию.")
+        kb = [[InlineKeyboardButton("Перейти в меню ролей", callback_data="roles_menu")]]
+        await update.message.reply_text("👉 Нажми, чтобы перейти в меню:", reply_markup=InlineKeyboardMarkup(kb))
+        session["state"] = "roles_menu"
+
+    # === Если копирайтер ===
     elif session.get("state") == "copywriter_mode":
         await update.message.reply_text("✍️ Пишу текст, подожди...")
 
@@ -112,7 +162,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "Ты профессиональный копирайтер."},
+                    {"role": "system", "content": "Ты профессиональный копирайтер. Пиши цепко, современно, без воды."},
                     {"role": "user", "content": text}
                 ]
             )
@@ -121,6 +171,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.message.reply_text("⚠️ Ошибка при обращении к OpenAI.")
             print("OpenAI Error:", e)
+
     else:
         await update.message.reply_text("Нажми /start, чтобы начать заново.")
 
