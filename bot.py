@@ -30,6 +30,18 @@ INFO_QUESTIONS = [
     "Супер! Теперь анализ твоей ЦА.\n💡 Опиши аудиторию, боли, страхи, желания."
 ]
 
+# === Цели постов ===
+POST_GOALS = {
+    "Имиджевая": "Метрика: упоминания, рост подписчиков, вовлеченность. Форматы: истории о себе/бренде, ценности, кейсы.",
+    "Вовлекающая": "Метрика: лайки, комментарии, сохранения. Форматы: опросы, викторины, челленджи, вопросы.",
+    "Образовательная": "Метрика: сохранения, переходы. Форматы: инструкции, гайды, чек-листы, экспертные советы.",
+    "Продающая": "Метрика: лиды, заявки, продажи. Форматы: офферы, акции, отзывы, демонстрация продукта.",
+    "Прогревающая": "Метрика: комментарии, заявки. Форматы: истории клиентов, закулисье, полезные факты.",
+    "Вирусная": "Метрика: репосты, охват. Форматы: тренды, мемы, провокации, эмоциональные видео.",
+    "Информационная": "Метрика: переходы, реакции. Форматы: анонсы, новости, релизы.",
+    "Развлекательная": "Метрика: лайки, репосты. Форматы: юмор, игры, легкие факты, блиц-опросы."
+}
+
 # === Приветствие ===
 WELCOME = (
     "👋 Привет! Ты в боте «Контент-ассистент». Он поможет:\n"
@@ -67,7 +79,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❗ Хорошо! Выбери, как будем собирать данные:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif query.data == "use_other_bot":
-        await query.edit_message_text("🤖 Ссылка на бота по распаковке (пока в разработке).")
+        await query.edit_message_text("🤖 Ссылка на бота по распаковке (в разработке).")
 
     elif query.data == "fill_here":
         sessions[user_id]["state"] = "collecting_info"
@@ -112,10 +124,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sessions[user_id]["task"] = task
         sessions[user_id]["step"] = 0
         sessions[user_id]["copy_data"] = []
-        await query.edit_message_text(
-            f"✍️ Отлично! Задача: *{task}*.\n\n1️⃣ Укажи цель текста (продажа, вовлечение, лид-магнит).",
-            parse_mode="Markdown"
-        )
+
+        # выводим цели постов
+        kb = [[InlineKeyboardButton(goal, callback_data=f"goal_{goal}")] for goal in POST_GOALS.keys()]
+        await query.edit_message_text("🎯 Выбери цель поста:", reply_markup=InlineKeyboardMarkup(kb))
+
+    # === Выбор цели поста ===
+    elif query.data.startswith("goal_"):
+        goal = query.data.split("_", 1)[1]
+        sessions[user_id]["copy_data"] = [goal]
+        sessions[user_id]["step"] = 1
+        await query.edit_message_text(f"✅ Цель выбрана: *{goal}*\n\n{POST_GOALS[goal]}\n\n2️⃣ Укажи тему текста:",
+                                      parse_mode="Markdown")
 
 # === Обработка сообщений ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -155,9 +175,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         step += 1
         session["step"] = step
 
-        if step == 1:
-            await update.message.reply_text("2️⃣ Укажи тему текста (например: продвижение курса, экспертная статья).")
-        elif step == 2:
+        if step == 2:
             await update.message.reply_text("3️⃣ Укажи тональность (экспертная, дружелюбная, дерзкая).")
         elif step == 3:
             goal, topic, tone = session["copy_data"]
@@ -165,9 +183,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             try:
                 prompt = (
-                    f"Ты профессиональный копирайтер. Напиши {task}.\n"
-                    f"🎯 Цель: {goal}\n📌 Тема: {topic}\n🎨 Тональность: {tone}\n"
-                    "Пиши цепко, без воды, современным языком 2024."
+                    f"Ты профессиональный копирайтер. Напиши {task}.\n\n"
+                    f"🎯 Цель: {goal}\n📌 Тема: {topic}\n🎨 Тональность: {tone}\n\n"
+                    "❗ Используй структуру:\n1. Заголовок\n2. Вступление\n3. Основная часть\n4. Вывод или CTA\n5. Оффер/УТП\n\n"
+                    "Пиши цепко, по-человечески, без клише, современным языком 2024–2025."
                 )
                 response = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
