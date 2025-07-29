@@ -235,111 +235,150 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                         reply_markup=InlineKeyboardMarkup(kb))
         session["state"] = "roles_menu"
 
-    # === Планировщик ===
-    elif session.get("state", "").startswith("planner_"):
-        step = int(session["state"].split("_")[1])
-        session.setdefault("planner_data", []).append(text)
+    # === Обработка диалога Планировщика ===
+elif session.get("state", "").startswith("planner_"):
+    step = session.get("step", 0)
+    session.setdefault("planner_data", [])
+    session["planner_data"].append(text)
+    step += 1
+    session["step"] = step
 
-        if step == 1:
-            session["state"] = "planner_2"
-            await update.message.reply_text("📌 Укажи основную соцсеть и нужна ли адаптация.")
-        elif step == 2:
-            session["state"] = "planner_3"
-            await update.message.reply_text("⏳ Укажи частоту публикаций (пример: сторис ежедневно, рилс ежедневно).")
-        elif step == 3:
-            session["state"] = "planner_4"
-            await update.message.reply_text("👤 От чьего лица вести: 1 лицо / бренд?")
-        elif step == 4:
-            session["state"] = "planner_5"
-            await update.message.reply_text("📅 Укажи срок (7 / 14 / 21 день).")
-        elif step == 5:
-            goal, platform, frequency, persona, duration = session["planner_data"]
-            await update.message.reply_text("🧠 Формирую контент-план, подожди...")
+    # Вопросы планировщика
+    planner_questions = [
+        "📌 Укажи цель (например: набор подписчиков, продажи продукта, прогрев, личный бренд).",
+        "📌 Основная соцсеть и нужна ли адаптация (например: Instagram, Telegram, TikTok).",
+        "📌 Укажи частоту публикаций (например: сторис ежедневно, рилс 3 раза в неделю, посты 2 раза в неделю).",
+        "📌 От чьего лица вести аккаунт? (1 лицо или бренд)",
+        "📌 На какой срок нужен план? (7, 10 или 30 дней)"
+    ]
 
-            try:
-                prompt = (
-                    f"Ты — контент-планировщик. Составь детализированный контент-план на {duration} дней для клиента.\n\n"
-                    f"📌 Данные клиента:\n"
-                    f"- Распаковка: {session['data'].get('info', [''])[0]}\n"
-                    f"- Позиционирование: {session['data'].get('info', ['',''])[1]}\n"
-                    f"- Продукт: {session['data'].get('info', ['','',''])[2]}\n"
-                    f"- ЦА: {session['data'].get('info', ['','','',''])[3]}\n\n"
-                    f"🎯 Цель: {goal}\nПлатформа: {platform}\nЧастота: {frequency}\nОт чьего лица: {persona}\n\n"
-                    "❗ ВАЖНО:\n"
-                    "– Не придумывай нишу, используй только данные клиента.\n"
-                    "– Каждый день должен включать:\n"
-                    "   🔹 1 Сторис (тема + CTA)\n"
-                    "   🔹 1 дополнительный формат — чередуй Reels и Пост/Карусель (тема + хук/заголовок + CTA)\n"
-                    "– Темы не должны повторяться.\n"
-                    "– Не обобщай, распиши каждый день отдельно.\n"
-                    "– В конце выдай идеи визуалов для каждого формата.\n\n"
-                    "Выводи план строго в виде:\n"
-                    "📅 День 1:\n– Сторис: ... CTA: ...\n– Reels: ... Хук: ... CTA: ...\n\n"
-                    "📅 День 2:\n– Сторис: ... CTA: ...\n– Пост/Карусель: ... Заголовок: ... CTA: ...\n\n"
-                    "и так далее до {duration} дней."
-                )
-                response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
-                                                        messages=[{"role": "user", "content": prompt}])
-                result = response["choices"][0]["message"]["content"]
-                await update.message.reply_text(result)
-            except Exception as e:
-                await update.message.reply_text("⚠️ Ошибка при генерации плана.")
-                print("OpenAI Error:", e)
+    if step < len(planner_questions):
+        await update.message.reply_text(planner_questions[step])
+    else:
+        # Все данные собраны → формируем запрос
+        goal, platform, frequency, persona, days = session["planner_data"]
+        await update.message.reply_text("🧠 Формирую индивидуальный контент-план, подожди...")
 
-            session["state"] = "roles_menu"
-            session["planner_data"] = []
-            kb = [[InlineKeyboardButton("Вернуться в меню ролей", callback_data="roles_menu")]]
-            await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+        try:
+            prompt = (
+                f"Ты контент-планировщик. Построй индивидуальный контент-план строго на {days} дней.\n"
+                f"Тематика: {session['planner']['topic']}\n"
+                f"Платформа: {session['planner']['platform']}\n"
+                f"Цель: {session['planner']['goal']}\n"
+                f"Частота публикаций: {session['planner']['frequency']}\n\n"
+                "📌 Правила:\n"
+                "1. Строго следуй частоте (не пропускай, не меняй местами).\n"
+                "2. Каждый день выдай:\n"
+                "   – Сторис (тема и CTA)\n"
+                "   – Либо Рилс, либо Пост/Карусель (с учетом частоты).\n"
+                "3. Если рилс/пост не запланирован на день – пропусти его, оставь только сторис.\n"
+                "4. Не используй 'и так далее'. Выдай план полностью.\n"
+                "5. Если план длинный – разбей на несколько сообщений, но выдай его весь.\n\n"
+                "Формат ответа:\n"
+                "День 1:\n– Сторис: ...\n– Рилс: ... (если есть)\n– Пост/Карусель: ... (если есть)\n\n"
+                "В конце добавь: Идеи визуалов (отдельным блоком)."
+            )
 
-    # === Копирайтер (диалог) ===
-    elif session.get("state", "").startswith("copywriter_"):
-        step = session.get("step", 0)
-        task = session.get("task")
-        session.setdefault("copy_data", []).append(text)
-        step += 1
-        session["step"] = step
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            result = response["choices"][0]["message"]["content"]
 
-        if step == 2:
-            await update.message.reply_text("3️⃣ Укажи тональность (экспертная, дружелюбная, дерзкая).")
-        elif step == 3:
-            await update.message.reply_text("4️⃣ Укажи формат (пост, Reels-текст, пост-карусель, оффер, лид-магнит).")
-        elif step == 4:
-            await update.message.reply_text("✍️ Пишу текст, подожди...")
+            # === Разбиваем текст на части по 📅 День ===
+            parts = result.split("📅")
+            for i, chunk in enumerate(parts):
+                if not chunk.strip():
+                    continue
+                formatted_chunk = ("📅" + chunk) if i > 0 else chunk
+                await update.message.reply_text(formatted_chunk.strip())
 
-            goal, topic, tone, format_text = session["copy_data"]
+            # === Отправляем идеи визуалов, если есть ===
+            if "Идеи визуалов" in result:
+                visuals = result.split("Идеи визуалов", 1)[1]
+                await update.message.reply_text("🎨 *Идеи визуалов:*" + visuals, parse_mode="Markdown")
 
-            format_instruction = ""
-            if format_text.lower() == "пост-карусель":
-                format_instruction = (
-                    "📌 Используй структуру поста-карусели (10 слайдов):\n"
-                    "1. Крючок\n2. Проблема\n3. Усиление боли\n4. Обещание решения\n5-8. Полезный контент\n"
-                    "9. CTA\n10. Оффер/экспертность\n"
-                    "Пиши тексты до 12 слов/слайд, добавляй цепкий CTA и заверши оффером клиента."
-                )
+        except Exception as e:
+            await update.message.reply_text("⚠️ Ошибка при генерации плана.")
+            print("Planner OpenAI Error:", e)
 
-            try:
-                prompt = (
-                    f"Ты — копирайтер. Напиши {task} для клиента, строго используя его данные.\n\n"
-                    f"📌 Клиент:\n- Распаковка: {session['data'].get('info', [''])[0]}\n"
-                    f"- Позиционирование: {session['data'].get('info', ['',''])[1]}\n"
-                    f"- Продукт: {session['data'].get('info', ['','',''])[2]}\n"
-                    f"- ЦА: {session['data'].get('info', ['','','',''])[3]}\n\n"
-                    f"🎯 Цель: {goal}\n📌 Тема: {topic}\n🎨 Тональность: {tone}\nФормат: {format_text}\n\n"
-                    f"{format_instruction}\n❗ Пиши от лица клиента, избегай клише, используй стиль 2024–2025."
-                )
-                response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
-                                                        messages=[{"role": "user", "content": prompt}])
-                result = response["choices"][0]["message"]["content"]
-                await update.message.reply_text(result)
-            except Exception as e:
-                await update.message.reply_text("⚠️ Ошибка при генерации текста.")
-                print("OpenAI Error:", e)
+        # Сбрасываем состояние
+        session["state"] = "roles_menu"
+        session["step"] = 0
+        session["planner_data"] = []
+        kb = [[InlineKeyboardButton("Вернуться в меню ролей", callback_data="roles_menu")]]
+        await update.message.reply_text("✅ План готов! Можешь запросить новую задачу:", reply_markup=InlineKeyboardMarkup(kb))
 
-            session["state"] = "roles_menu"
-            session["step"] = 0
-            session["copy_data"] = []
-            kb = [[InlineKeyboardButton("Вернуться в меню ролей", callback_data="roles_menu")]]
-            await update.message.reply_text("✅ Текст готов!", reply_markup=InlineKeyboardMarkup(kb))
+    # === Копирайтер (диалог с новым шагом) ===
+elif session.get("state", "").startswith("copywriter_"):
+    step = session.get("step", 0)
+    task = session.get("task")
+    session.setdefault("copy_data", [])
+
+    # Сохраняем ответы пользователя
+    session["copy_data"].append(text)
+    step += 1
+    session["step"] = step
+
+    # === Логика шагов ===
+    if step == 1:
+        await update.message.reply_text("2️⃣ Укажи тему текста (например: продвижение курса, экспертная статья).")
+
+    elif step == 2:
+        # 🔥 Новый шаг: спрашиваем формат (развернутый / краткий)
+        await update.message.reply_text("📝 Хочешь пост развернутый или краткий, но емкий?")
+
+    elif step == 3:
+        session["copy_type"] = text  # Сохраняем выбор формата
+        await update.message.reply_text("3️⃣ Укажи тональность (экспертная, дружелюбная, дерзкая).")
+
+    elif step == 4:
+        await update.message.reply_text("4️⃣ Укажи формат (пост, Reels-текст, пост-карусель, оффер, лид-магнит).")
+
+    elif step == 5:
+        await update.message.reply_text("✍️ Пишу текст, подожди...")
+
+        # Извлекаем данные для OpenAI
+        goal, topic, copy_type, tone, format_text = session["copy_data"][0], session["copy_data"][1], session.get("copy_type", "краткий"), session["copy_data"][2], session["copy_data"][3]
+
+        # Если формат = пост-карусель, добавляем инструкцию
+        format_instruction = ""
+        if format_text.lower() == "пост-карусель":
+            format_instruction = (
+                "📌 Используй структуру поста-карусели (10 слайдов):\n"
+                "1. Крючок\n2. Проблема\n3. Усиление боли\n4. Обещание решения\n5-8. Полезный контент\n"
+                "9. CTA\n10. Оффер/экспертность\n"
+                "Текст до 12 слов/слайд, добавь цепкий CTA и заверши оффером клиента."
+            )
+
+        try:
+            # === Запрос к OpenAI ===
+            prompt = (
+                f"Ты профессиональный копирайтер. Напиши {task} для клиента.\n\n"
+                f"🎯 Цель: {goal}\n📌 Тема: {topic}\n📝 Формат поста: {copy_type}\n🎨 Тональность: {tone}\n"
+                f"Формат публикации: {format_text}\n{format_instruction}\n\n"
+                "❗ Пиши от лица клиента, без клише, в стиле 2024–2025. "
+                "Если пост краткий — делай его ёмким и цепким. Если развернутый — глубоко раскрывай тему."
+            )
+
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            result = response["choices"][0]["message"]["content"]
+            await update.message.reply_text(result)
+
+        except Exception as e:
+            await update.message.reply_text("⚠️ Ошибка при генерации текста.")
+            print("OpenAI Error:", e)
+
+        # Сбрасываем состояние
+        session["state"] = "roles_menu"
+        session["step"] = 0
+        session["copy_data"] = []
+        kb = [[InlineKeyboardButton("Вернуться в меню ролей", callback_data="roles_menu")]]
+        await update.message.reply_text("✅ Текст готов! Выбери новую задачу:", reply_markup=InlineKeyboardMarkup(kb))
 
     # === Продюсер Reels ===
     elif session.get("state", "").startswith("reels_"):
