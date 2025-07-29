@@ -64,72 +64,6 @@ WELCOME = (
 # === /start ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[InlineKeyboardButton("СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-    await update.message.reply_text(WELCOME, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")import os
-import sys
-from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes
-)
-import openai
-
-print(">>> Бот загружен, файл bot.py исполняется")
-
-# ---------- НАСТРОЙКИ ----------
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-if "RUNNING_BOT" in os.environ:
-    print("❌ Бот уже запущен. Останови другой процесс.")
-    sys.exit(1)
-os.environ["RUNNING_BOT"] = "1"
-
-sessions = {}
-
-# === Вопросы для сбора информации ===
-INFO_QUESTIONS = [
-    "Пришли, пожалуйста, свою распаковку личности и экспертности.\n💡 *Распаковка* — описание ценностей и опыта.",
-    "Супер! Благодарю! Теперь пришли своё позиционирование.\n💡 *Позиционирование* — чем занимаешься и для кого.",
-    "Отлично! Теперь краткая характеристика продукта/услуги.\n💡 Опиши, что предлагаешь и пользу для клиента.",
-    "Супер! Теперь анализ твоей ЦА.\n💡 Опиши аудиторию, боли, страхи, желания."
-]
-
-# === Цели постов ===
-POST_GOALS = {
-    "Имиджевая": "Метрика: упоминания, рост подписчиков. Форматы: истории, ценности, миссия, кейсы.",
-    "Вовлекающая": "Метрика: лайки, комментарии. Форматы: опросы, челленджи, вопросы.",
-    "Образовательная": "Метрика: сохранения, переходы. Форматы: гайды, инструкции, чек-листы.",
-    "Продающая": "Метрика: лиды, заявки, продажи. Форматы: офферы, акции, отзывы.",
-    "Прогревающая": "Метрика: заявки после серии постов. Форматы: кейсы, закулисье, факты.",
-    "Вирусная": "Метрика: репосты, охват. Форматы: тренды, мемы, провокации.",
-    "Информационная": "Метрика: переходы, реакции. Форматы: анонсы, новости, релизы.",
-    "Развлекательная": "Метрика: удержание, репосты. Форматы: юмор, подборки, игры."
-}
-
-# === Цели планировщика ===
-PLANNER_GOALS = [
-    "Набор подписчиков",
-    "Продажа продукта",
-    "Повышение узнаваемости бренда",
-    "Вовлечение аудитории",
-    "Прогрев перед запуском",
-    "Удержание клиентов"
-]
-
-# === Приветствие ===
-WELCOME = (
-    "👋 Привет! Ты в боте «Контент-ассистент». Он поможет:\n"
-    "• создать контент-стратегию;\n• контент-план;\n• посты и офферы;\n• сценарии для Reels.\n\n"
-    "🔐 Подтверди согласие с [Политикой](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit) "
-    "и [Офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit).\n\n"
-    "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и начнём!"
-)
-
-# === /start ===
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [[InlineKeyboardButton("СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
     await update.message.reply_text(WELCOME, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
 # === ОБРАБОТКА КНОПОК ===
@@ -354,6 +288,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session["strateg_data"] = []
             kb = [[InlineKeyboardButton("Вернуться в меню ролей", callback_data="roles_menu")]]
             await update.message.reply_text("✅ Стратегия готова!", reply_markup=InlineKeyboardMarkup(kb))
+
     # === Планировщик ===
     elif session.get("state", "").startswith("planner_"):
         step = int(session["state"].split("_")[1])
