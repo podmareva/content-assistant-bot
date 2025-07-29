@@ -127,19 +127,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === Меню ролей ===
     elif query.data == "roles_menu":
         kb = [
-            [InlineKeyboardButton("📊 Контент-стратег", callback_data="role_strateg")],
             [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
             [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
             [InlineKeyboardButton("🎬 Продюсер Reels", callback_data="role_reels")]
         ]
         await query.edit_message_text("Выбери, чем помочь:", reply_markup=InlineKeyboardMarkup(kb))
         sessions[user_id]["state"] = "menu_roles"
-
-    # === Контент-Стратег ===
-    elif query.data == "role_strateg":
-        sessions[user_id]["state"] = "strateg_1"
-        sessions[user_id]["strateg_data"] = []
-        await query.edit_message_text("📌 Укажи платформу (Instagram, Telegram, ВК и т.д.):")
 
     # === Планировщик ===
     elif query.data == "role_planner":
@@ -242,53 +235,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                         reply_markup=InlineKeyboardMarkup(kb))
         session["state"] = "roles_menu"
 
-    # === Контент-Стратег ===
-    elif session.get("state", "").startswith("strateg_"):
-        step = int(session["state"].split("_")[1])
-        session.setdefault("strateg_data", []).append(text)
-
-        if step == 1:
-            session["state"] = "strateg_2"
-            await update.message.reply_text("🎯 Укажи цель: привлечение / продажи / личный бренд / прогрев.")
-        elif step == 2:
-            session["state"] = "strateg_3"
-            await update.message.reply_text("📌 Укажи форматы: Reels / посты / сторис.")
-        elif step == 3:
-            session["state"] = "strateg_4"
-            await update.message.reply_text("⏳ Укажи частоту публикаций (пример: рилс – ежедневно, пост – раз в неделю).")
-        elif step == 4:
-            session["state"] = "strateg_5"
-            await update.message.reply_text("📅 На какой срок нужен контент-план? (7, 14 или 21 день)")
-        elif step == 5:
-            platform, goal, formats, frequency, duration = session["strateg_data"]
-            await update.message.reply_text("🧠 Формирую стратегию, подожди...")
-
-            try:
-                prompt = (
-                    f"Ты — контент-стратег. Составь стратегию для клиента, используя только его данные.\n\n"
-                    f"📌 Данные клиента:\n"
-                    f"- Распаковка: {session['data'].get('info', [''])[0]}\n"
-                    f"- Позиционирование: {session['data'].get('info', ['',''])[1]}\n"
-                    f"- Продукт: {session['data'].get('info', ['','',''])[2]}\n"
-                    f"- ЦА: {session['data'].get('info', ['','','',''])[3]}\n\n"
-                    f"🎯 Цель: {goal}\n📌 Платформа: {platform}\nФорматы: {formats}\nЧастота: {frequency}\nСрок: {duration} дней\n\n"
-                    "❗ Пиши стратегию строго от имени клиента, без выдуманных ниш. "
-                    "Если данных не хватает — укажи, что нужно уточнить.\n\n"
-                    "Выдай:\n- План по дням\n- Рубрикатор\n- Воронку (холодная/тёплая/горячая)\n- Примеры заголовков и CTA."
-                )
-                response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
-                                                        messages=[{"role": "user", "content": prompt}])
-                result = response["choices"][0]["message"]["content"]
-                await update.message.reply_text(result)
-            except Exception as e:
-                await update.message.reply_text("⚠️ Ошибка при генерации стратегии.")
-                print("OpenAI Error:", e)
-
-            session["state"] = "roles_menu"
-            session["strateg_data"] = []
-            kb = [[InlineKeyboardButton("Вернуться в меню ролей", callback_data="roles_menu")]]
-            await update.message.reply_text("✅ Стратегия готова!", reply_markup=InlineKeyboardMarkup(kb))
-
     # === Планировщик ===
     elif session.get("state", "").startswith("planner_"):
         step = int(session["state"].split("_")[1])
@@ -305,21 +251,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("👤 От чьего лица вести: 1 лицо / бренд?")
         elif step == 4:
             session["state"] = "planner_5"
-            await update.message.reply_text("📅 Укажи срок (7 / 10 / 30 дней).")
+            await update.message.reply_text("📅 Укажи срок (7 / 14 / 21 день).")
         elif step == 5:
             goal, platform, frequency, persona, duration = session["planner_data"]
             await update.message.reply_text("🧠 Формирую контент-план, подожди...")
 
             try:
                 prompt = (
-                    f"Ты — контент-планировщик. Составь персональный план для клиента, используя только его данные.\n\n"
-                    f"📌 Клиент:\n- Распаковка: {session['data'].get('info', [''])[0]}\n"
+                    f"Ты — контент-планировщик. Составь детализированный контент-план на {duration} дней для клиента.\n\n"
+                    f"📌 Данные клиента:\n"
+                    f"- Распаковка: {session['data'].get('info', [''])[0]}\n"
                     f"- Позиционирование: {session['data'].get('info', ['',''])[1]}\n"
                     f"- Продукт: {session['data'].get('info', ['','',''])[2]}\n"
                     f"- ЦА: {session['data'].get('info', ['','','',''])[3]}\n\n"
-                    f"🎯 Цель: {goal}\nПлатформа: {platform}\nЧастота: {frequency}\nОт чьего лица: {persona}\nСрок: {duration} дней\n\n"
-                    "❗ Не придумывай нишу, используй только данные клиента. "
-                    "Выдай:\n- План по дням\n- Темы, формат, цель, CTA\n- Идеи сторис\n- Визуальные подсказки."
+                    f"🎯 Цель: {goal}\nПлатформа: {platform}\nЧастота: {frequency}\nОт чьего лица: {persona}\n\n"
+                    "❗ ВАЖНО:\n"
+                    "– Не придумывай нишу, используй только данные клиента.\n"
+                    "– Каждый день должен включать:\n"
+                    "   🔹 1 Сторис (тема + CTA)\n"
+                    "   🔹 1 дополнительный формат — чередуй Reels и Пост/Карусель (тема + хук/заголовок + CTA)\n"
+                    "– Темы не должны повторяться.\n"
+                    "– Не обобщай, распиши каждый день отдельно.\n"
+                    "– В конце выдай идеи визуалов для каждого формата.\n\n"
+                    "Выводи план строго в виде:\n"
+                    "📅 День 1:\n– Сторис: ... CTA: ...\n– Reels: ... Хук: ... CTA: ...\n\n"
+                    "📅 День 2:\n– Сторис: ... CTA: ...\n– Пост/Карусель: ... Заголовок: ... CTA: ...\n\n"
+                    "и так далее до {duration} дней."
                 )
                 response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
                                                         messages=[{"role": "user", "content": prompt}])
