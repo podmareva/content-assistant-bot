@@ -1,3 +1,4 @@
+```python
 import os
 import sys
 from dotenv import load_dotenv
@@ -21,30 +22,48 @@ if "RUNNING_BOT" in os.environ:
     sys.exit(1)
 os.environ["RUNNING_BOT"] = "1"
 
+# Хранилище сессий пользователей
 sessions = {}
 
 # ---------- ПРИВЕТСТВИЕ ----------
 WELCOME = (
-    "👋 Привет! Ты в боте «Контент-ассистент».\n\n"
-    "Он поможет:\n"
-    "• составить контент-план,\n"
-    "• написать посты, Reels, карусели,\n"
-    "• придумать офферы и упаковку продукта.\n\n"
-    "🔐 Подтверди согласие с политикой и офертой, чтобы продолжить.\n"
+    "👋 Привет! Ты в боте «Контент-ассистент».
+"
+    "Он поможет:
+"
+    "• составить контент-план,
+"
+    "• написать посты, Reels, карусели,
+"
+    "• придумать офферы и упаковку продукта.
+
+"
+    "🔐 Чтобы начать, подтверди согласие с "
+    "[Политикой конфиденциальности]"
+    "(https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit)"
+    " и [Договором‑офертой]"
+    "(https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit).
+
+"
     "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!"
 )
 
 # ====== ХЕНДЛЕР /start ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-    await update.message.reply_text(WELCOME, reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        WELCOME,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-# ====== BUTTON HANDLER ======
+# ====== ОБРАБОТКА CALLBACK_QUERY ======
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     sessions.setdefault(user_id, {"state": None, "data": {}, "step": 0, "products": []})
+    session = sessions[user_id]
 
     # --- Пользователь согласился ---
     if query.data == "agree":
@@ -59,39 +78,105 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- Пользователь нажал ДА → пошаговый сбор ---
     elif query.data == "base_yes":
-        sessions[user_id]["state"] = "collecting_base_info"
-        sessions[user_id]["step"] = 0
-        sessions[user_id]["data"] = {"info": [], "products": []}
-        await query.edit_message_text("✅ Отлично! Пришли, пожалуйста, свою распаковку личности и экспертности.")
+        session.update({"state": "collecting_base_info", "step": 0, "data": {"info": [], "products": []}})
+        await query.edit_message_text("✅ Отлично! Пришли свою распаковку личности и экспертности.")
 
-    # --- Пользователь нажал НЕТ → поясняем, что такое данные и просим заполнить ---
+    # --- Пользователь нажал НЕТ → поясняем и просим заполнить ---
     elif query.data == "base_no":
         kb = [
             [InlineKeyboardButton("Заполнить данные здесь", callback_data="fill_here")],
             [InlineKeyboardButton("Использовать бота «Твоя распаковка и анализ ЦА»", callback_data="use_other_bot")]
         ]
         await query.edit_message_text(
-            "❗ Хорошо! Без основы работать сложнее, но мы можем собрать её прямо здесь.\n\n"
-            "📌 *Что нужно подготовить:*\n"
-            "– Распаковка (кто ты, твои ценности, опыт, экспертность),\n"
-            "– Позиционирование (чем занимаешься, для кого),\n"
-            "– Продукты/услуги (опиши каждый),\n"
-            "– Анализ ЦА (кто твоя аудитория, боли, желания).\n\n"
+            "❗ Хорошо! Без основы работать сложнее, но мы можем собрать её прямо здесь.
+
+"
+            "📌 *Что нужно подготовить:*
+"
+            "– Распаковка (кто ты, твои ценности, опыт, экспертность),
+"
+            "– Позиционирование (чем занимаешься, для кого),
+"
+            "– Продукты/услуги (опиши каждый),
+"
+            "– Анализ ЦА (кто твоя аудитория, боли, желания).
+
+"
             "Выбери вариант:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(kb)
         )
 
     elif query.data == "use_other_bot":
-        await query.edit_message_text("🤖 [Ссылка на бота по распаковке] (в разработке).")
+        await query.edit_message_text("🤖 Ссылка на внешний бот по распаковке (в разработке)")
 
     elif query.data == "fill_here":
-        sessions[user_id]["state"] = "collecting_base_info"
-        sessions[user_id]["step"] = 0
-        sessions[user_id]["data"] = {"info": [], "products": []}
-        await query.edit_message_text("✍️ Окей, начнем! Пришли свою распаковку личности и экспертности.")
+        session.update({"state": "collecting_base_info", "step": 0, "data": {"info": [], "products": []}})
+        await query.edit_message_text("✍️ Пришли распаковку личности и экспертности.")
 
-# ====== HANDLE MESSAGE (обновленная версия) ======
+    # --- Сбор продуктов ---
+    elif query.data == "add_product":
+        session["state"] = "collecting_more_products"
+        await query.edit_message_text("✍️ Пришли характеристику следующего продукта/услуги.")
+
+    elif query.data == "no_more_products":
+        session["state"] = "collecting_audience"
+        await query.edit_message_text("📌 Пришли анализ ЦА (боли, страхи, желания).")
+
+    # --- Доп. информация по ЦА ---
+    elif query.data == "add_extra_info":
+        session["state"] = "waiting_extra_info"
+        await query.edit_message_text("✍️ Пришли дополнительную информацию по ЦА.")
+
+    elif query.data == "no_extra_info":
+        session["state"] = "menu_roles"
+        kb = [[InlineKeyboardButton("Перейти к выбору роли", callback_data="roles_menu")]]
+        await query.edit_message_text("✅ Полная информация получена!", reply_markup=InlineKeyboardMarkup(kb))
+
+    # --- Меню ролей ---
+    elif query.data == "roles_menu":
+        kb = [
+            [InlineKeyboardButton("Планировщик контента", callback_data="role_planner")],
+            [InlineKeyboardButton("Копирайтер", callback_data="role_copywriter")],
+            [InlineKeyboardButton("Продюсер Reels", callback_data="role_reels")]
+        ]
+        await query.edit_message_text("Выбери роль:", reply_markup=InlineKeyboardMarkup(kb))
+
+    # --- Роли ---
+    elif query.data == "role_planner":
+        session.update({"state": "planner_platform", "planner": {}})
+        await query.edit_message_text("📌 Укажи основную соцсеть (Instagram, Telegram, VK и т.д.).")
+
+    elif query.data == "role_copywriter":
+        kb = [
+            [InlineKeyboardButton("Написать пост", callback_data="copy_post")],
+            [InlineKeyboardButton("Редактировать текст", callback_data="copy_edit")],
+            [InlineKeyboardButton("Придумать оффер", callback_data="copy_offer")],
+            [InlineKeyboardButton("Лид-магнит", callback_data="copy_lead")],
+            [InlineKeyboardButton("Упаковка продукта", callback_data="copy_package")],
+            [InlineKeyboardButton("Пост-карусель", callback_data="copy_carousel")]
+        ]
+        session["state"] = "copywriter_mode"
+        await query.edit_message_text("🖊️ Я копирайтер! Чем помочь?", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif query.data.startswith("copy_"):
+        task = query.data.split("_",1)[1]
+        session.update({"state": f"copywriter_{task}", "task": task, "step": 0, "copy_data": []})
+        await query.edit_message_text(
+            f"📌 Отлично! Ты выбрал задачу: {task}.
+
+1️⃣ Укажи цель текста (имиджевая, вовлекающая, продающая, прогревающая, образовательная, вирусная, информационная, развлекательная).",
+            parse_mode="Markdown"
+        )
+
+    elif query.data == "role_reels":
+        session.update({"state": "reels_topic", "reels_data": []})
+        await query.edit_message_text("🎬 Укажи тему и цель ролика.")
+
+    else:
+        await query.edit_message_text("Нажми /start, чтобы начать заново.")
+
+# ====== ОБРАБОТКА СООБЩЕНИЙ ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
@@ -101,60 +186,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # === СБОР БАЗОВОЙ ИНФОРМАЦИИ ===
     if state == "collecting_base_info":
-        # 0 - распаковка
         if step == 0:
             session["data"]["info"].append({"распаковка": text})
             session["step"] = 1
             await update.message.reply_text("🔥 Супер! Благодарю! Теперь пришли своё позиционирование.")
             return
-
-        # 1 - позиционирование
         elif step == 1:
             session["data"]["info"].append({"позиционирование": text})
             session["step"] = 2
             await update.message.reply_text("✅ Отлично! Теперь пришли краткую характеристику продукта/услуги.")
             return
-
-        # 2 - первый продукт
         elif step == 2:
             session["products"].append(text)
             session["state"] = "ask_more_products"
-            kb = [
-                [InlineKeyboardButton("Да ✅", callback_data="add_product")],
-                [InlineKeyboardButton("Нет ❌", callback_data="no_more_products")]
-            ]
-            await update.message.reply_text("Есть ли у тебя ещё продукт или услуга?",
-                                            reply_markup=InlineKeyboardMarkup(kb))
+            kb = [[InlineKeyboardButton("Да ✅", callback_data="add_product")],
+                  [InlineKeyboardButton("Нет ❌", callback_data="no_more_products")]]
+            await update.message.reply_text("Есть ли у тебя ещё продукт или услуга?", reply_markup=InlineKeyboardMarkup(kb))
             return
 
     # === СОБИРАЕМ ДОПОЛНИТЕЛЬНЫЕ ПРОДУКТЫ ===
-    elif state == "collecting_more_products":
+    if state == "collecting_more_products":
         session["products"].append(text)
-        kb = [
-            [InlineKeyboardButton("Да ✅", callback_data="add_product")],
-            [InlineKeyboardButton("Нет ❌", callback_data="no_more_products")]
-        ]
-        await update.message.reply_text("Есть ли ещё продукт или услуга?",
-                                        reply_markup=InlineKeyboardMarkup(kb))
+        kb = [[InlineKeyboardButton("Да ✅", callback_data="add_product")],
+              [InlineKeyboardButton("Нет ❌", callback_data="no_more_products")]]
+        await update.message.reply_text("Есть ли ещё продукт или услуга?", reply_markup=InlineKeyboardMarkup(kb))
         return
 
     # === ДОП.ИНФОРМАЦИЯ ПО ЦА ===
-    elif state == "waiting_extra_info":
-        # пользователь прислал дополнительное сообщение
-        extra_info = session["data"].get("extra_info", "")
-        session["data"]["extra_info"] = extra_info + "\n" + text
-
-        kb = [
-            [InlineKeyboardButton("Да ✅", callback_data="add_extra_info")],
-            [InlineKeyboardButton("Нет ❌", callback_data="no_extra_info")]
-        ]
-        await update.message.reply_text("Есть ли ещё дополнительная информация по ЦА?",
-                                        reply_markup=InlineKeyboardMarkup(kb))
+    if state == "collecting_audience":
+        session["data"]["extra_info"] = text
+        session["state"] = "waiting_extra_info"
+        kb = [[InlineKeyboardButton("Да ✅", callback_data="add_extra_info")],
+              [InlineKeyboardButton("Нет ❌", callback_data="no_extra_info")]]
+        await update.message.reply_text("Есть ли ещё дополнительная информация по ЦА?", reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    else:
-        await update.message.reply_text("Нажми /start, чтобы начать заново.")
-
+    if state == "waiting_extra_info":
+        session["data"]["extra_info"] += "\n" + text
+        kb = [[InlineKeyboardButton("Да ✅", callback_data="add_extra_info")],
+              [InlineKeyboardButton("Нет ❌", callback_data="no_extra_info")]]
+        await update.message.reply_text("Есть ли ещё инфо по ЦА?", reply_markup=InlineKeyboardMarkup(kb))
+        return
 
 # ====== ДОБАВЛЕНИЕ КНОПОК В button_handler ======
     # --- Пользователь добавляет ещё продукт ---
