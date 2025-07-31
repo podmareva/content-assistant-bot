@@ -250,8 +250,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["task"] = task
         session["step"] = 0
         session["copy_data"] = []
-                await query.edit_message_text("1️⃣ Укажи цель текста (имиджевая, вовлекающая, продающая, образовательная).\n"
-                                      "📌 И напиши, нужен ли пост развернутый или краткий, но ёмкий.")
+        await query.edit_message_text(
+            "1️⃣ Укажи цель текста (имиджевая, вовлекающая, продающая, образовательная).",
+            parse_mode="Markdown"
+        )
 
     # === Продюсер Reels ===
     elif query.data == "role_reels":
