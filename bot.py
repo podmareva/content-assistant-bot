@@ -158,7 +158,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link) "
             "и [Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link).\n\n"
             "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup = InlineKeyboardMarkup(kb)
         )
         return
 
