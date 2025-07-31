@@ -56,6 +56,8 @@ def get_user_context(session):
     positioning = info_parts[1] if len(info_parts) > 1 else ""
     product_desc = "; ".join(products) if products else (info_parts[2] if len(info_parts) > 2 else "")
     audience = info_parts[3] if len(info_parts) > 3 else ""
+    # Стиль берем из распаковки и позиционирования
+    style = f"Стиль: основывается на {unpacking} и {positioning}"
 
     return (
         f"📌 Распаковка личности: {unpacking}\n"
@@ -63,6 +65,7 @@ def get_user_context(session):
         f"📌 Продукты/услуги: {product_desc}\n"
         f"📌 Анализ ЦА: {audience}\n"
         f"📌 Доп.информация: {extra_info}"
+        f"🎨 Стиль пользователя: {style}\n"
     )
 
 # === Очистка текста от запрещенных фраз ===
@@ -120,8 +123,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• составить контент-план\n"
         "• написать пост или Reels\n"
         "• упаковать продукт\n\n"
-        "🔐 Подтверди согласие, чтобы начать.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "🔐 Чтобы начать, подтверди согласие с "
+        "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true) и "
+        "[Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true).\n\n"
+        "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!"
     )
 
 # === button_handler ===
@@ -135,7 +140,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     session = sessions.setdefault(user_id, {"state": None, "step": 0, "data": {}, "products": []})
-
+    
+    sessions[cid] = {
+        "stage": "welcome",
+        "answers": [],
+        "product_answers": [],
+        "products": []
+    }
+    kb = [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
+    await ctx.bot.send_message(chat_id=cid, text=WELCOME, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+    
     # --- Согласие ---
     if query.data == "agree":
         kb = [
@@ -151,6 +165,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["step"] = 0
         session["data"] = {"info": [], "products": []}
         await query.edit_message_text(INFO_QUESTIONS[0])
+    
+    # --- После получения характеристики продукта ---
+    elif query.data == "ask_more_products":
+        kb = [
+            [InlineKeyboardButton("Да ✅", callback_data="add_product")],
+            [InlineKeyboardButton("Нет ❌", callback_data="no_more_products")]
+        ]
+        await query.edit_message_text("🛍️ У тебя есть ещё продукт или услуга?", reply_markup=InlineKeyboardMarkup(kb))
 
     # --- Пользователь не имеет основу ---
     elif query.data == "base_no":
@@ -174,9 +196,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✍️ Пришли характеристику следующего продукта/услуги.")
 
     elif query.data == "no_more_products":
-        session["state"] = "collecting_audience"
-        await query.edit_message_text("📌 Отлично! Теперь пришли анализ твоей ЦА.")
+    session["state"] = "collecting_audience_multiple"
+    session["audience_segments"] = []
+    await query.edit_message_text("📌 Отлично! Теперь пришли первый сегмент анализа твоей ЦА.")
 
+elif query.data == "add_audience_segment":
+    session["state"] = "collecting_audience_multiple"
+    await query.edit_message_text("✍️ Пришли следующий сегмент анализа ЦА.")
+
+elif query.data == "audience_done":
+    session["data"]["audience"] = "\n\n".join(session.get("audience_segments", []))
+    kb = [[InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
+          [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]]
+    await query.edit_message_text("✅ Анализ ЦА собран. Хочешь добавить дополнительную информацию?",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+                                  
     # --- Доп.инфо ---
     elif query.data == "add_extra_info":
         session["state"] = "waiting_extra_info"
@@ -216,7 +250,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["task"] = task
         session["step"] = 0
         session["copy_data"] = []
-        await query.edit_message_text("1️⃣ Укажи цель текста (имиджевая, вовлекающая, продающая, образовательная).")
+                await query.edit_message_text("1️⃣ Укажи цель текста (имиджевая, вовлекающая, продающая, образовательная).\n"
+                                      "📌 И напиши, нужен ли пост развернутый или краткий, но ёмкий.")
 
     # === Продюсер Reels ===
     elif query.data == "role_reels":
@@ -229,7 +264,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(user_id):
         await update.message.reply_text("❌ У вас нет доступа.")
         return
-
+    
+    # 🔹 Всегда обновляем контекст пользователя, включая стиль
+    context_text = get_user_context(session)
     text = update.message.text
     session = sessions.setdefault(user_id, {"state": None, "step": 0, "data": {}, "products": []})
 
@@ -264,6 +301,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
               [InlineKeyboardButton("Нет", callback_data="no_more_products")]]
         await update.message.reply_text("✅ Продукт добавлен. Добавить ещё?",
+                                        reply_markup=InlineKeyboardMarkup(kb))
+    
+        # === Сбор нескольких сегментов ЦА ===
+    elif session["state"] == "collecting_audience_multiple":
+        session.setdefault("audience_segments", []).append(text)
+        kb = [[InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
+              [InlineKeyboardButton("Нет", callback_data="audience_done")]]
+        await update.message.reply_text("✅ Сегмент ЦА добавлен. Добавить ещё?",
                                         reply_markup=InlineKeyboardMarkup(kb))
 
     # === Доп.инфо ===
@@ -391,14 +436,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🗓 Частота публикаций: {freq}\n"
             f"👤 От чьего лица вести: {face}\n\n"
 
+            "=== АНАЛИЗ ЦЕЛЕВОЙ АУДИТОРИИ ===\n"
+            "Пользователь прислал несколько сегментов ЦА. "
+            "Для каждого дня указывай, для какого сегмента подходит контент (или для нескольких). "
+            "Обязательно используй данные сегментов, а не пиши общие советы.\n\n"
+
             "=== ТРЕБОВАНИЯ К ПЛАНУ ===\n"
             "– Каждый день должен включать: сторис + (или рилс / пост-карусель)\n"
             "– Укажи для каждого дня: тему, формат, цель, CTA, идеи сторис, визуальные подсказки\n"
             "– Раздели контент по рубрикатору: экспертность, вовлечение, личное, кейсы, продажи\n"
-            "– Привяжи каждый день к этапу воронки: холодная, тёплая, горячая аудитория\n\n"
+            "– Привяжи каждый день к этапу воронки: холодная, тёплая, горячая аудитория\n"
+            "– Добавляй пометку [Сегмент ЦА: ...] для каждого элемента контента\n\n"
 
             "=== ФОРМАТ ВЫВОДА ===\n"
-            "День 1:\n• Сторис – тема, идея, CTA\n• Рилс/Пост – тема, формат, краткий сценарий, CTA\n\n"
+            "День 1:\n• Сторис – тема, идея, CTA [Сегмент ЦА: сегмент1]\n• Рилс/Пост – тема, формат, краткий сценарий, CTA [Сегмент ЦА: сегмент2]\n\n"
             "День 2:\n• … (и так далее для всех дней)\n\n"
 
             "=== СПЕЦИФИКА ===\n"
