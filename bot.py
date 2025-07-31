@@ -1,12 +1,10 @@
 import os
 import sys
 import sqlite3
+import secrets
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import openai
 
 print(">>> Бот загружен, файл bot.py исполняется")
@@ -15,25 +13,47 @@ print(">>> Бот загружен, файл bot.py исполняется")
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 BOT_NAME = "ContentAssistantBot"
 
 # === SQLite для токенов ===
-conn = sqlite3.connect("db.sqlite", check_same_thread=False)
-cur = conn.cursor()
-cur.execute("CREATE TABLE IF NOT EXISTS allowed_users(user_id INTEGER, bot_name TEXT)")
-cur.execute("CREATE TABLE IF NOT EXISTS tokens(token TEXT, bot_name TEXT, user_id INTEGER)")
-conn.commit()
+DB_PATH = "db.sqlite"
 
-# === Проверка доступа ===
-def is_allowed(user_id):
-    if user_id == ADMIN_ID:  # ✅ Админ всегда имеет доступ
+def init_db():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            bot_name TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tokens (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER,
+            bot_name TEXT
+        )
+    """)
+    conn.commit()
+    return conn, cur
+
+conn, cur = init_db()
+
+def validate_token(token, user_id):
+    cur.execute("SELECT user_id FROM tokens WHERE token=? AND bot_name=?", (token, BOT_NAME))
+    row = cur.fetchone()
+    if row and row[0] == user_id:
+        cur.execute("INSERT OR IGNORE INTO users(user_id, bot_name) VALUES(?, ?)", (user_id, BOT_NAME))
+        cur.execute("DELETE FROM tokens WHERE token=?", (token,))
+        conn.commit()
         return True
-    cur.execute("SELECT 1 FROM allowed_users WHERE user_id=? AND bot_name=?", (user_id, BOT_NAME))
+    return False
+
+def is_allowed(user_id):
+    cur.execute("SELECT 1 FROM users WHERE user_id=? AND bot_name=?", (user_id, BOT_NAME))
     return cur.fetchone() is not None
 
-# === Генерация токена (только для админа) ===
-import secrets
 async def gentoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Нет прав.")
@@ -43,10 +63,47 @@ async def gentoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     target_id = int(context.args[0])
     token = secrets.token_hex(4)
-    cur.execute("INSERT INTO tokens(token, bot_name, user_id) VALUES(?, ?, ?)", (token, BOT_NAME, target_id))
+    cur.execute("INSERT OR REPLACE INTO tokens(token, user_id, bot_name) VALUES(?, ?, ?)", (token, target_id, BOT_NAME))
     conn.commit()
     link = f"https://t.me/{BOT_NAME}?start={token}"
-    await update.message.reply_text(f"✅ Сгенерирован токен:\n{token}\n🔗 Ссылка: {link}")
+    await update.message.reply_text(f"✅ Сгенерирован токен для {target_id}\n🔗 {link}")
+
+# === Приветствие ===
+WELCOME = (
+    "👋 Привет! Ты в боте «Контент-ассистент».\n\n"
+    "Он поможет:\n"
+    "• составить контент-план\n"
+    "• написать пост или Reels\n"
+    "• упаковать продукт\n\n"
+    "🔐 Чтобы начать, подтверди согласие с "
+    "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true) и "
+    "[Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true).\n\n"
+    "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!"
+)
+
+# === /start ===
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    args = context.args
+
+    # --- Проверка токена ---
+    if args:
+        token = args[0]
+        if validate_token(token, user_id):
+            await update.message.reply_text("✅ Доступ активирован! Можешь работать.")
+        else:
+            await update.message.reply_text("❌ Неверный или использованный токен.")
+        return
+
+    # --- Проверка доступа ---
+    if user_id != ADMIN_ID and not is_allowed(user_id):
+        await update.message.reply_text("⛔️ У вас нет доступа. Купите доступ у администратора.")
+        return
+
+    # --- Приветствие с кнопкой ---
+    kb = [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
+    await update.message.reply_text(WELCOME, reply_markup=InlineKeyboardMarkup(kb))
+
 
 # === Сбор контекста пользователя ===
 def get_user_context(session):
