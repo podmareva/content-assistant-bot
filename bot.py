@@ -214,7 +214,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "products": []
     })
     kb = [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-    await ctx.bot.send_message(chat_id=cid, text=WELCOME, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+    await context.bot.send_message(chat_id=user_id, text=ПРИВЕТСТВУЕМ, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
     
     # --- Согласие ---
     if query.data == "agree":
