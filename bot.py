@@ -305,11 +305,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
         # === Сбор нескольких сегментов ЦА ===
     elif session["state"] == "collecting_audience_multiple":
-        session.setdefault("audience_segments", []).append(text)
-        kb = [[InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
-              [InlineKeyboardButton("Нет", callback_data="audience_done")]]
-        await update.message.reply_text("✅ Сегмент ЦА добавлен. Добавить ещё?",
-                                        reply_markup=InlineKeyboardMarkup(kb))
+        # Сохраняем очередное сообщение анализа ЦА
+        session["data"].setdefault("audience_segments", []).append(text)
+        kb = [
+            [InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
+            [InlineKeyboardButton("Закончить", callback_data="audience_done")]
+        ]
+        await update.message.reply_text(
+            "✅ Сегмент добавлен. Хочешь добавить ещё один сегмент ЦА?",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
 
     # === Доп.инфо ===
     elif session["state"] == "waiting_extra_info":
