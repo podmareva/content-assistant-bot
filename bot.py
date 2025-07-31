@@ -148,16 +148,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id == ADMIN_ID:
         await update.message.reply_text("👑 Привет, админ! Ты уже имеешь полный доступ.")
         keyboard = [[InlineKeyboardButton("СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-        await update.message.reply_text(
+        WELCOME_MSG = (
             "👋 Привет! Ты в боте «Контент-ассистент».\n\n"
-        "Он поможет:\n"
-        "• составить контент-план\n"
-        "• написать пост или Reels\n"
-        "• упаковать продукт\n\n"
-        "🔐 Чтобы начать, подтверди согласие с "
-        "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true) и "
-        "[Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true).\n\n"
-        "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!",
+            "Он поможет:\n"
+            "• составить контент-план\n"
+            "• написать пост или Reels\n"
+            "• упаковать продукт\n\n"
+            "🔐 Чтобы начать, подтверди согласие с "
+            "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link) "
+            "и [Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link).\n\n"
+            "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -183,15 +183,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- Приветствие для пользователей с доступом ---
     keyboard = [[InlineKeyboardButton("СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-    await update.message.reply_text(
+    WELCOME_MSG = (
         "👋 Привет! Ты в боте «Контент-ассистент».\n\n"
         "Он поможет:\n"
         "• составить контент-план\n"
         "• написать пост или Reels\n"
         "• упаковать продукт\n\n"
         "🔐 Чтобы начать, подтверди согласие с "
-        "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true) и "
-        "[Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true).\n\n"
+        "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link) "
+        "и [Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link).\n\n"
         "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!"
     )
 
@@ -214,7 +214,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "products": []
     })
     kb = [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-    await context.bot.send_message(chat_id=user_id, text=ПРИВЕТСТВУЕМ, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+    await context.bot.send_message(chat_id=user_id, text=WELCOME_MSG, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
     
     # --- Согласие ---
     if query.data == "agree":
