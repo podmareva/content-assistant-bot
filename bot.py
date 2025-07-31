@@ -196,19 +196,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✍️ Пришли характеристику следующего продукта/услуги.")
 
     elif query.data == "no_more_products":
-    session["state"] = "collecting_audience_multiple"
-    session["audience_segments"] = []
-    await query.edit_message_text("📌 Отлично! Теперь пришли первый сегмент анализа твоей ЦА.")
+        session["state"] = "collecting_audience_multiple"
+        session["audience_segments"] = []
+        await query.edit_message_text("📌 Отлично! Теперь пришли первый сегмент анализа твоей ЦА.")
 
-elif query.data == "add_audience_segment":
-    session["state"] = "collecting_audience_multiple"
-    await query.edit_message_text("✍️ Пришли следующий сегмент анализа ЦА.")
+    elif query.data == "add_audience_segment":
+        session["state"] = "collecting_audience_multiple"
+        await query.edit_message_text("✍️ Пришли следующий сегмент анализа ЦА.")
 
-elif query.data == "audience_done":
-    session["data"]["audience"] = "\n\n".join(session.get("audience_segments", []))
-    kb = [[InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
-          [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]]
-    await query.edit_message_text("✅ Анализ ЦА собран. Хочешь добавить дополнительную информацию?",
+    elif query.data == "audience_done":
+        session["data"]["audience"] = "\n\n".join(session.get("audience_segments", []))
+        kb = [[InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
+             [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]]
+        await query.edit_message_text("✅ Анализ ЦА собран. Хочешь добавить дополнительную информацию?",
                                   reply_markup=InlineKeyboardMarkup(kb))
                                   
     # --- Доп.инфо ---
