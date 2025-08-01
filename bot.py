@@ -615,16 +615,17 @@ async def main():
     print("🚀 Бот запущен! Ждём пользователей...")
     await app.run_polling(close_loop=False)
 
-# === Запуск ===
+# === Запуск бота ===
 if __name__ == "__main__":
-    import nest_asyncio
-    import asyncio
-    nest_asyncio.apply()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    try:
-        asyncio.get_event_loop().run_until_complete(main())
-    except RuntimeError:
-        # Если цикл уже идёт (Render), просто создаём задачу
-        loop = asyncio.get_event_loop()
-        loop.create_task(main())
-        loop.run_forever()
+    # Регистрируем все хендлеры
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("gentoken", gentoken))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.ALL, any_message))
+
+    print("🚀 Бот запущен! Ждём пользователей...")
+    app.run_polling()   # ✅ Без asyncio.run()
+
