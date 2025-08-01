@@ -1,6 +1,7 @@
 import os
 import sys
 import sqlite3
+import asyncio   # ✅ Должен быть обязательно
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
