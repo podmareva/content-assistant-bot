@@ -588,20 +588,25 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("🤔 Я не понял команду. Нажми /start, чтобы начать заново.")
 
-# === Запуск бота ===
-if __name__ == "__main__":
+# === Асинхронный запуск бота (фикс для Render) ===
+async def main():
+    # ✅ Отключаем старый Webhook перед запуском (фикс Conflict)
+    await disable_webhook()
+
+    # ✅ Создаём приложение
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # === Команды ===
+    # ✅ Регистрируем обработчики
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("gentoken", gentoken))  # только для админа
-
-    # === Callback кнопки ===
+    app.add_handler(CommandHandler("gentoken", gentoken))
     app.add_handler(CallbackQueryHandler(button_handler))
-
-    # === Сообщения ===
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.ALL, any_message))
 
     print("🚀 Бот запущен! Ждём пользователей...")
-    app.run_polling()
+    # ✅ Запускаем бота асинхронно
+    await app.run_polling()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
