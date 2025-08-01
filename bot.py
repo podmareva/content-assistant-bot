@@ -37,6 +37,21 @@ cur.execute(
 )
 conn.commit()
 
+# === Глобальные переменные ===
+sessions = {}
+
+# === Вспомогательные функции ===
+def get_user_context(session):
+    return "\n".join([f"{k}: {v}" for k, v in session.get("data", {}).items()]) if session else "Нет данных"
+
+def sanitize_ad_text(text):
+    return text.replace("100%", "почти наверняка").replace("лучший", "один из лучших")
+
+async def send_long_message(chat_id, text, context):
+    MAX_LEN = 4000
+    for i in range(0, len(text), MAX_LEN):
+        await context.bot.send_message(chat_id=chat_id, text=text[i:i+MAX_LEN])
+
 # === Проверка доступа ===
 def is_allowed(user_id: int) -> bool:
     if user_id == ADMIN_ID:
@@ -114,9 +129,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = context.args
     if user_id == ADMIN_ID:
-        await update.message.reply_text(
-            "👑 Привет, админ! У тебя полный доступ."
-        )
+        await update.message.reply_text("👑 Привет, админ! У тебя полный доступ.")
         await update.message.reply_text(
             WELCOME,
             parse_mode="Markdown",
@@ -151,6 +164,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("❌ У вас нет доступа.", show_alert=True)
         return
     await query.answer()
+
     session = sessions.setdefault(user_id, {
         "state": None,
         "step": 0,
@@ -173,10 +187,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Есть ли у тебя уже основа (распаковка, позиционирование, анализ ЦА)?",
             reply_markup=InlineKeyboardMarkup(kb)
         )
+
     # --- Пользователь имеет основу ---
     elif query.data == "base_yes":
         session.update({"state": "collecting_base_info", "step": 0, "data": {"info": [], "products": []}})
         await query.edit_message_text(INFO_QUESTIONS[0])
+
     # --- Нет основы ---
     elif query.data == "base_no":
         kb = [
@@ -187,22 +203,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Давай соберём основу прямо здесь:",
             reply_markup=InlineKeyboardMarkup(kb)
         )
+
     elif query.data == "fill_here":
         session.update({"state": "collecting_base_info", "step": 0})
         await query.edit_message_text(INFO_QUESTIONS[0])
+
     elif query.data == "use_other_bot":
         await query.edit_message_text("🤖 Бот по распаковке в разработке.")
+
     # --- Сбор продуктов ---
     elif query.data == "add_product":
         session["state"] = "collecting_more_products"
         await query.edit_message_text("✍️ Пришли характеристику следующего продукта.")
+
     elif query.data == "no_more_products":
         session["state"] = "collecting_audience_multiple"
         await query.edit_message_text("📌 Пришли первый сегмент анализа ЦА.")
-    # --- Сбор сегментов ЦА ---
+
+    # --- Сегменты ЦА ---
     elif query.data == "add_audience_segment":
         session["state"] = "collecting_audience_multiple"
         await query.edit_message_text("✍️ Пришли следующий сегмент анализа ЦА.")
+
     elif query.data == "audience_done":
         data["extra_info"] = "\n\n".join(session.get("audience_segments", []))
         kb = [
@@ -213,14 +235,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Анализ ЦА собран. Добавить дополнительную информацию?",
             reply_markup=InlineKeyboardMarkup(kb)
         )
+
     # --- Доп. информация ---
     elif query.data == "add_extra_info":
         session["state"] = "waiting_extra_info"
         await query.edit_message_text("✍️ Пришли дополнительную информацию по ЦА.")
+
     elif query.data == "no_extra_info":
         session["state"] = "menu_roles"
         kb = [[InlineKeyboardButton("Перейти к ролям", callback_data="roles_menu")]]
         await query.edit_message_text("✅ Информация получена! Переходим к ролям.", reply_markup=InlineKeyboardMarkup(kb))
+
     # --- Меню ролей ---
     elif query.data == "roles_menu":
         kb = [
@@ -266,59 +291,52 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(user_id):
         await update.message.reply_text("❌ У вас нет доступа.")
         return
-    
-    # 🔹 Всегда обновляем контекст пользователя, включая стиль
-    context_text = get_user_context(session)
-    text = update.message.text
+
+    # 🔹 Сессия пользователя
     session = sessions.setdefault(user_id, {"state": None, "step": 0, "data": {}, "products": []})
+    text = update.message.text
 
     # === Сбор основной информации ===
     if session["state"] == "collecting_base_info":
         step = session["step"]
         session["data"].setdefault("info", []).append(text)
-        step += 1
-        session["step"] = step
+        session["step"] = step + 1
 
-        # После продукта → спросить есть ли еще
-        if step == 3:  
+        if session["step"] == 3:
             kb = [[InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
                   [InlineKeyboardButton("Нет", callback_data="no_more_products")]]
             await update.message.reply_text("🔥 Отлично! Хочешь добавить ещё продукт/услугу?",
                                             reply_markup=InlineKeyboardMarkup(kb))
             return
 
-        if step < len(INFO_QUESTIONS):
-            await update.message.reply_text(INFO_QUESTIONS[step])
+        if session["step"] < len(INFO_QUESTIONS):
+            await update.message.reply_text(INFO_QUESTIONS[session["step"]])
         else:
-            # Переход к доп.инфо
             kb = [[InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
                   [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]]
             await update.message.reply_text("Хочешь отправить дополнительную информацию по ЦА?",
                                             reply_markup=InlineKeyboardMarkup(kb))
             session["state"] = "awaiting_extra"
 
-    # === Сбор дополнительных продуктов ===
+    # === Дополнительные продукты ===
     elif session["state"] == "collecting_more_products":
         session["products"].append(text)
         kb = [[InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
               [InlineKeyboardButton("Нет", callback_data="no_more_products")]]
         await update.message.reply_text("✅ Продукт добавлен. Добавить ещё?",
                                         reply_markup=InlineKeyboardMarkup(kb))
-    
-        # === Сбор нескольких сегментов ЦА ===
+
+    # === Сегменты ЦА ===
     elif session["state"] == "collecting_audience_multiple":
-        # Сохраняем очередное сообщение анализа ЦА
         session["data"].setdefault("audience_segments", []).append(text)
         kb = [
             [InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
             [InlineKeyboardButton("Закончить", callback_data="audience_done")]
         ]
-        await update.message.reply_text(
-            "✅ Сегмент добавлен. Хочешь добавить ещё один сегмент ЦА?",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+        await update.message.reply_text("✅ Сегмент добавлен. Хочешь добавить ещё один сегмент ЦА?",
+                                        reply_markup=InlineKeyboardMarkup(kb))
 
-    # === Доп.инфо ===
+    # === Доп. информация ===
     elif session["state"] == "waiting_extra_info":
         session["data"]["extra_info"] = text
         kb = [[InlineKeyboardButton("Перейти к ролям", callback_data="roles_menu")]]
@@ -332,20 +350,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["copy_data"].append(text)
         session["step"] = step + 1
 
-        # Шаг 1 → цель
         if step == 0:
             await update.message.reply_text("2️⃣ Укажи тему текста.")
-        # Шаг 2 → тема
         elif step == 1:
             await update.message.reply_text("3️⃣ Укажи тональность (экспертная, дружелюбная, дерзкая).")
-        # Шаг 3 → тональность
         elif step == 2:
             await update.message.reply_text("4️⃣ Хочешь развернутый текст или краткий, но ёмкий?")
-        # Шаг 4 → запрос в OpenAI
         elif step == 3:
             goal, topic, tone, length = session["copy_data"]
             context_text = get_user_context(session)
 
+            # 🟢 ВОССТАНОВЛЕН ПОЛНЫЙ ПРОМТ КОПИРАЙТЕРА (как в твоём оригинале)
             prompt = (
                 f"Ты профессиональный копирайтер и упаковщик. Создай {session['task']} для блогера/эксперта/бренда.\n\n"
                 f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
@@ -387,11 +402,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "– Применяй сторителлинг, честный контент, вовлечение\n"
                 "– Упрощай и усиливай, если текст есть\n\n"
 
-                "⚖️ Соблюдай Федеральный закон №38-ФЗ и №72-ФЗ: "
+                "⚖️ Соблюдай Федеральный закон №38-ФЗ и №72-ФЗ от 07.04.2025: "
                 "не используй фразы «100% результат», «лучший», «гарантировано», "
                 "заменяй их корректными альтернативами: «один из популярных вариантов», «подходит для…», «узнай подробнее».\n\n"
-
-    "💡 Выдай текст в структурированном виде, готовый к публикации."
+                "💡 Выдай текст в структурированном виде, готовый к публикации."
             )
 
             await update.message.reply_text("✍️ Пишу текст, подожди...")
@@ -401,47 +415,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     messages=[{"role": "user", "content": prompt}]
                 )
                 result = sanitize_ad_text(response["choices"][0]["message"]["content"])
-                await send_long_message(update.message.chat, result)
+                await send_long_message(update.effective_chat.id, result, context)
             except Exception as e:
                 await update.message.reply_text("⚠️ Ошибка генерации текста.")
                 print("OpenAI Error:", e)
 
-            # Сброс
             session["state"] = "menu_roles"
             session["step"] = 0
             kb = [[InlineKeyboardButton("Вернуться к ролям", callback_data="roles_menu")]]
             await update.message.reply_text("✅ Готово!", reply_markup=InlineKeyboardMarkup(kb))
 
-    # === Планировщик ===
+    # === Планировщик контента ===
     elif session["state"] == "planner_goal":
         session["planner_data"] = [text]
         session["state"] = "planner_platform"
         await update.message.reply_text("2️⃣ Укажи основную соцсеть.")
+
     elif session["state"] == "planner_platform":
         session["planner_data"].append(text)
         session["state"] = "planner_frequency"
         await update.message.reply_text("3️⃣ Укажи частоту публикаций (пример: сторис ежедневно, рилс 3 раза в неделю).")
+
     elif session["state"] == "planner_frequency":
         session["planner_data"].append(text)
         session["state"] = "planner_face"
         await update.message.reply_text("4️⃣ От чьего лица вести (1 лицо / бренд)?")
+
     elif session["state"] == "planner_face":
         session["planner_data"].append(text)
         session["state"] = "planner_days"
         await update.message.reply_text("5️⃣ На какой срок нужен план? (7 / 10 / 30 дней)")
+
     elif session["state"] == "planner_days":
         session["planner_data"].append(text)
         goal, platform, freq, face, days = session["planner_data"]
         context_text = get_user_context(session)
 
+        # 🟢 ВОССТАНОВЛЕН ПОЛНЫЙ ПРОМТ ПЛАНИРОВЩИКА
         prompt = (
             f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный контент-план.\n\n"
             f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
-            f"🎯 Цель: {goal}\n"
-            f"📌 Платформа: {platform}\n"
-            f"📅 Срок: {days} дней\n"
-            f"🗓 Частота публикаций: {freq}\n"
-            f"👤 От чьего лица вести: {face}\n\n"
+            f"🎯 Цель: {goal}\n📌 Платформа: {platform}\n📅 Срок: {days} дней\n"
+            f"🗓 Частота публикаций: {freq}\n👤 От чьего лица вести: {face}\n\n"
 
             "=== АНАЛИЗ ЦЕЛЕВОЙ АУДИТОРИИ ===\n"
             "Пользователь прислал несколько сегментов ЦА. "
@@ -476,7 +491,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 messages=[{"role": "user", "content": prompt}]
             )
             result = sanitize_ad_text(response["choices"][0]["message"]["content"])
-            await send_long_message(update.message.chat, result)
+            await send_long_message(update.effective_chat.id, result, context)
         except Exception as e:
             await update.message.reply_text("⚠️ Ошибка генерации плана.")
             print("Planner Error:", e)
@@ -490,27 +505,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["reels_data"].append(text)
         session["state"] = "reels_format"
         await update.message.reply_text("2️⃣ Укажи формат: с лицом / без лица / монтаж.")
+
     elif session["state"] == "reels_format":
         session["reels_data"].append(text)
         session["state"] = "reels_style"
         await update.message.reply_text("3️⃣ Укажи стиль: экспертный / с юмором / душевный.")
+
     elif session["state"] == "reels_style":
         session["reels_data"].append(text)
         session["state"] = "reels_music"
         await update.message.reply_text("4️⃣ Есть ли музыка или референс?")
+
     elif session["state"] == "reels_music":
         session["reels_data"].append(text)
         topic, format_r, style, music = session["reels_data"]
         context_text = get_user_context(session)
 
+        # 🟢 ВОССТАНОВЛЕН ПОЛНЫЙ ПРОМТ REELS
         prompt = (
             f"Ты профессиональный продюсер коротких видео (Reels, TikTok, Shorts, ВК-клипы). "
             f"Создай сценарий для видео по данным пользователя.\n\n"
             f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
-            f"🎯 Тема ролика: {topic}\n"
-            f"📹 Формат: {format_r} (с лицом / без лица / монтаж)\n"
-            f"🎨 Стиль: {style}\n"
-            f"🎵 Музыка/референс: {music}\n\n"
+            f"🎯 Тема ролика: {topic}\n📹 Формат: {format_r} (с лицом / без лица / монтаж)\n🎨 Стиль: {style}\n🎵 Музыка/референс: {music}\n\n"
 
             "=== ОБЯЗАТЕЛЬНАЯ СТРУКТУРА СЦЕНАРИЯ ===\n"
             "1️⃣ Хук (2–3 секунды, мощный захват внимания)\n"
@@ -525,7 +541,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "– Встраивай честный оффер, если это уместно\n"
             "– Делай сценарий максимально практичным и готовым к съёмке\n\n"
 
-            "⚖️ Соблюдай Федеральный закон №38-ФЗ «О рекламе» и №72-ФЗ: "
+            "⚖️ Соблюдай Федеральный закон №38-ФЗ «О рекламе» и №72-ФЗ от 07.04.2025: "
             "не используй необоснованные обещания («100% результат», «лучший», «гарантировано»), "
             "заменяй их корректными альтернативами («один из популярных вариантов», «подходит для…», «узнай подробнее»)."
         )
@@ -537,7 +553,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 messages=[{"role": "user", "content": prompt}]
             )
             result = sanitize_ad_text(response["choices"][0]["message"]["content"])
-            await send_long_message(update.message.chat, result)
+            await send_long_message(update.effective_chat.id, result, context)
         except Exception as e:
             await update.message.reply_text("⚠️ Ошибка генерации сценария.")
             print("Reels Error:", e)
@@ -546,7 +562,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("Вернуться к ролям", callback_data="roles_menu")]]
         await update.message.reply_text("✅ Сценарий готов!", reply_markup=InlineKeyboardMarkup(kb))
 
-# === Общий хендлер для всех других сообщений (если что-то не распознано) ===
+# === Общий хендлер для непонятных сообщений ===
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_allowed(user_id):
@@ -558,14 +574,9 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Команды
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("gentoken", gentoken))  # только для админа
-
-    # Callback кнопки
+    app.add_handler(CommandHandler("gentoken", gentoken))
     app.add_handler(CallbackQueryHandler(button_handler))
-
-    # Сообщения
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.ALL, any_message))
 
