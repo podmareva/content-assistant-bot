@@ -588,9 +588,9 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("🤔 Я не понял команду. Нажми /start, чтобы начать заново.")
 
-# === Асинхронный запуск бота (фикс для Render) ===
+# === Асинхронный запуск бота (фикс event loop для Render) ===
 async def main():
-    # ✅ Отключаем старый Webhook перед запуском (фикс Conflict)
+    # ✅ Отключаем старый Webhook перед запуском (исключаем конфликты polling)
     await disable_webhook()
 
     # ✅ Создаём приложение
@@ -604,9 +604,13 @@ async def main():
     app.add_handler(MessageHandler(filters.ALL, any_message))
 
     print("🚀 Бот запущен! Ждём пользователей...")
-    # ✅ Запускаем бота асинхронно
     await app.run_polling()
 
+# === Запуск через существующий event loop (корректно для Render) ===
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("⛔ Бот остановлен вручную.")
