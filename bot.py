@@ -254,43 +254,49 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🎬 Reels", callback_data="role_reels")]
         ]
         session["state"] = "menu_roles"
-        await query.edit_message_text("Выбери роль:", reply_markup=InlineKeyboardMarkup(kb))
+        await query.edit_message_text("🤖 Твои помощники: выбери, кто тебе нужен сейчас👇", reply_markup=InlineKeyboardMarkup(kb))
+
+    # === Планировщик ===
+    elif query.data == "role_planner":
+        kb = [
+            [InlineKeyboardButton("🗓 Начать сбор данных для контент-плана", callback_data="planner_start")],
+            [InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]
+        ]
+        session["state"] = "planner_menu"
+        await query.edit_message_text("📅 Я — Планировщик. Чем займёмся?", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif query.data == "planner_start":
+        session["state"] = "planner_goal"
+        session["planner_data"] = []
+        await query.edit_message_text("🎯 Укажи главную цель контент-плана.")
 
     # === Копирайтер ===
     elif query.data == "role_copywriter":
         kb = [
-            [InlineKeyboardButton("Пост", callback_data="copy_post")],
-            [InlineKeyboardButton("Редактировать текст", callback_data="copy_edit")],
-            [InlineKeyboardButton("Оффер", callback_data="copy_offer")],
-            [InlineKeyboardButton("Лид-магнит", callback_data="copy_lead")],
-            [InlineKeyboardButton("Упаковка продукта", callback_data="copy_package")],
-            [InlineKeyboardButton("Пост-карусель", callback_data="copy_carousel")]
+            [InlineKeyboardButton("📝 Пост", callback_data="copy_post")],
+            [InlineKeyboardButton("✂️ Редактировать текст", callback_data="copy_edit")],
+            [InlineKeyboardButton("💡 Оффер", callback_data="copy_offer")],
+            [InlineKeyboardButton("🎁 Лид-магнит", callback_data="copy_lead")],
+            [InlineKeyboardButton("📦 Упаковка продукта", callback_data="copy_package")],
+            [InlineKeyboardButton("📊 Пост-карусель", callback_data="copy_carousel")],
+            [InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]
         ]
-        await query.edit_message_text("🖊️ Я копирайтер! Что создаём?", reply_markup=InlineKeyboardMarkup(kb))
         session["state"] = "copywriter_menu"
+        await query.edit_message_text("✍️ Я — Копирайтер. Что создаём?", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif query.data.startswith("copy_"):
-        task = query.data.split("_", 1)[1]
-        session["state"] = f"copywriter_{task}"
-        session["task"] = task
-        session["step"] = 0
-        session["copy_data"] = []
-        await query.edit_message_text(
-            "1️⃣ Укажи цель текста (имиджевая, вовлекающая, продающая, образовательная).",
-            parse_mode="Markdown"
-        )
-
-    # === Продюсер Reels ===
+    # === Reels ===
     elif query.data == "role_reels":
+        kb = [
+            [InlineKeyboardButton("🎬 Начать создание сценария Reels", callback_data="reels_start")],
+            [InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]
+        ]
+        session["state"] = "reels_menu"
+        await query.edit_message_text("🎥 Я — Продюсер Reels. Что будем снимать?", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif query.data == "reels_start":
         session["state"] = "reels_topic"
         session["reels_data"] = []
         await query.edit_message_text("🎬 Укажи тему и цель ролика.")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_allowed(user_id):
-        await update.message.reply_text("❌ У вас нет доступа.")
-        return
 
     # 🔹 Сессия пользователя
     session = sessions.setdefault(user_id, {"state": None, "step": 0, "data": {}, "products": []})
