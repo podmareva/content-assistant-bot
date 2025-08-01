@@ -578,28 +578,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("Вернуться к ролям", callback_data="roles_menu")]]
         await update.message.reply_text("✅ Сценарий готов!", reply_markup=InlineKeyboardMarkup(kb))
 
-# === Общий хендлер для всех других сообщений (если что-то не распознано) ===
+# === Хендлер неизвестных сообщений ===
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_allowed(user_id):
-        await update.message.reply_text("❌ У вас нет доступа.")
-        return
-    await update.message.reply_text("🤔 Я не понял команду. Нажми /start, чтобы начать заново.")
+    await update.message.reply_text("🤔 Не понял команду. Нажми /start для начала.")
 
-# === Запуск бота ===
-if __name__ == "__main__":
+# === MAIN (Render-friendly) ===
+async def main():
+    await disable_webhook()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Команды
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("gentoken", gentoken))  # только для админа
-
-    # Callback кнопки
+    app.add_handler(CommandHandler("gentoken", gentoken))
     app.add_handler(CallbackQueryHandler(button_handler))
-
-    # Сообщения
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))  # ✅ handle_message уже определён выше
     app.add_handler(MessageHandler(filters.ALL, any_message))
 
     print("🚀 Бот запущен! Ждём пользователей...")
-    app.run_polling()
+    await app.run_polling(close_loop=False)
+
+if __name__ == "__main__":
+    asyncio.run(main())
