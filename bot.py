@@ -588,28 +588,18 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("🤔 Я не понял команду. Нажми /start, чтобы начать заново.")
 
-# === Асинхронный запуск бота ===
-# === Асинхронный запуск бота (фикс для Render) ===
+# === Асинхронный запуск бота (простая версия, работает на Render) ===
 async def main():
     await disable_webhook()
-
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("gentoken", gentoken))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.ALL, any_message))
-
     print("🚀 Бот запущен! Ждём пользователей...")
-
-    # 🔹 Вместо app.run_polling() — ручной запуск без закрытия event loop
-    await app.initialize()
-    await app.start()
-    await asyncio.Event().wait()  # держим бота в работе бесконечно
+    await app.run_polling(close_loop=False)   # 🔥 ключевой фикс
 
 if __name__ == "__main__":
     import asyncio
-    try:
-        asyncio.run(main())  # теперь безопасно
-    except (KeyboardInterrupt, SystemExit):
-        print("⛔ Бот остановлен вручную.")
+    asyncio.run(main())
