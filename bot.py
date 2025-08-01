@@ -1,3 +1,4 @@
+```python
 import os
 import sys
 import sqlite3
@@ -8,6 +9,7 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes
 )
 import openai
+import secrets
 
 print(">>> Бот загружен, файл bot.py исполняется")
 
@@ -18,14 +20,18 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 BOT_NAME = "ContentAssistantBot"
 
-# === SQLite для токенов ===
+# === SQLite для токенов и пользователей ===
 conn = sqlite3.connect("db.sqlite", check_same_thread=False)
 cur = conn.cursor()
-cur.execute("CREATE TABLE IF NOT EXISTS allowed_users(user_id INTEGER, bot_name TEXT)")
-cur.execute("CREATE TABLE IF NOT EXISTS tokens(token TEXT, bot_name TEXT, user_id INTEGER)")
+cur.execute(
+    "CREATE TABLE IF NOT EXISTS allowed_users (user_id INTEGER, bot_name TEXT, UNIQUE(user_id, bot_name))"
+)
+cur.execute(
+    "CREATE TABLE IF NOT EXISTS tokens (token TEXT PRIMARY KEY, bot_name TEXT, user_id INTEGER)"
+)
 conn.commit()
 
-# ✅ Автоматически добавляем админа в разрешённые
+# Автоматически добавляем админа
 cur.execute(
     "INSERT OR IGNORE INTO allowed_users(user_id, bot_name) VALUES(?, ?)",
     (ADMIN_ID, BOT_NAME)
@@ -33,49 +39,93 @@ cur.execute(
 conn.commit()
 
 # === Проверка доступа ===
-def is_allowed(user_id):
-    # ✅ Админ всегда имеет доступ
+def is_allowed(user_id: int) -> bool:
     if user_id == ADMIN_ID:
         return True
-    # 🔍 Проверка обычных пользователей
-    cur.execute("SELECT 1 FROM allowed_users WHERE user_id=? AND bot_name=?", (user_id, BOT_NAME))
+    cur.execute(
+        "SELECT 1 FROM allowed_users WHERE user_id=? AND bot_name=?",
+        (user_id, BOT_NAME)
+    )
     return cur.fetchone() is not None
 
-# === Генерация токена (только для админа) ===
-import secrets
+# === Генерация токена (для админа) ===
 async def gentoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
         await update.message.reply_text("❌ Нет прав.")
         return
     if not context.args:
-        await update.message.reply_text("⚠️ Используй: /gentoken user_id")
+        await update.message.reply_text("⚠️ Используй: /gentoken <user_id>")
         return
-    target_id = int(context.args[0])
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Некорректный user_id.")
+        return
     token = secrets.token_hex(4)
-    cur.execute("INSERT INTO tokens(token, bot_name, user_id) VALUES(?, ?, ?)", (token, BOT_NAME, target_id))
+    cur.execute(
+        "INSERT INTO tokens(token, bot_name, user_id) VALUES(?, ?, ?)",
+        (token, BOT_NAME, target_id)
+    )
     conn.commit()
     link = f"https://t.me/{BOT_NAME}?start={token}"
-    await update.message.reply_text(f"✅ Сгенерирован токен:\n{token}\n🔗 Ссылка: {link}")
+    await update.message.reply_text(
+        f"✅ Сгенерирован токен для {target_id}:\n{token}\n{link}"
+    )
 
-# === Приветствие ===
+# === Проверка токена ===
+def validate_token(token: str, user_id: int) -> bool:
+    cur.execute(
+        "SELECT user_id FROM tokens WHERE token=? AND bot_name=?",
+        (token, BOT_NAME)
+    )
+    row = cur.fetchone()
+    if row and row[0] == user_id:
+        cur.execute(
+            "INSERT OR IGNORE INTO allowed_users(user_id, bot_name) VALUES(?, ?)",
+            (user_id, BOT_NAME)
+        )
+        cur.execute("DELETE FROM tokens WHERE token=?", (token,))
+        conn.commit()
+        return True
+    return False
+
+# === Приветствие и /start ===
 WELCOME = (
     "👋 Привет! Ты в боте «Контент-ассистент».\n\n"
     "Он поможет:\n"
-    "• составить контент-план\n"
-    "• написать пост или Reels\n"
-    "• упаковать продукт\n\n"
+    "• составить контент-план,\n"
+    "• написать пост или Reels,\n"
+    "• упаковать продукт.\n\n"
     "🔐 Чтобы начать, подтверди согласие с "
-    "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true) и "
-    "[Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link&ouid=104429050326439982568&rtpof=true&sd=true).\n\n"
+    "[Политикой конфиденциальности]"
+    "(https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit)"
+    " и [Договором‑офертой]"
+    "(https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit).\n\n"
     "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!"
 )
+INFO_QUESTIONS = [
+    "✍️ Пришли свою распаковку личности и экспертности.",
+    "🔥 Отлично! Теперь пришли своё позиционирование.",
+    "✅ Теперь пришли характеристику продукта/услуги.",
+    "📌 Пришли анализ твоей ЦА."
+]
 
-# === /start ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = context.args
-
-    # --- Проверка токена ---
+    if user_id == ADMIN_ID:
+        await update.message.reply_text(
+            "👑 Привет, админ! У тебя полный доступ."
+        )
+        await update.message.reply_text(
+            WELCOME,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
+            )
+        )
+        return
     if args:
         token = args[0]
         if validate_token(token, user_id):
@@ -83,219 +133,104 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❌ Неверный или использованный токен.")
         return
-
-    # --- Проверка доступа ---
-    if user_id != ADMIN_ID and not is_allowed(user_id):
+    if not is_allowed(user_id):
         await update.message.reply_text("⛔️ У вас нет доступа. Купите доступ у администратора.")
         return
-
-    # --- Приветствие с кнопкой ---
-    kb = [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-    await update.message.reply_text(WELCOME, reply_markup=InlineKeyboardMarkup(kb))
-
-
-# === Сбор контекста пользователя ===
-def get_user_context(session):
-    info_parts = session.get("data", {}).get("info", [])
-    products = session.get("products", [])
-    extra_info = session.get("data", {}).get("extra_info", "")
-
-    unpacking = info_parts[0] if len(info_parts) > 0 else ""
-    positioning = info_parts[1] if len(info_parts) > 1 else ""
-    product_desc = "; ".join(products) if products else (info_parts[2] if len(info_parts) > 2 else "")
-    audience = info_parts[3] if len(info_parts) > 3 else ""
-    # Стиль берем из распаковки и позиционирования
-    style = f"Стиль: основывается на {unpacking} и {positioning}"
-
-    return (
-        f"📌 Распаковка личности: {unpacking}\n"
-        f"📌 Позиционирование: {positioning}\n"
-        f"📌 Продукты/услуги: {product_desc}\n"
-        f"📌 Анализ ЦА: {audience}\n"
-        f"📌 Доп.информация: {extra_info}"
-        f"🎨 Стиль пользователя: {style}\n"
-    )
-
-# === Очистка текста от запрещенных фраз ===
-def sanitize_ad_text(text):
-    banned = ["100% результат", "лучший", "гарантировано"]
-    for w in banned:
-        text = text.replace(w, "один из популярных вариантов")
-    return text
-
-# === Отправка длинных сообщений кусками ===
-async def send_long_message(chat, text):
-    for i in range(0, len(text), 3800):
-        await chat.send_message(text[i:i + 3800])
-
-# === Сессии пользователей ===
-sessions = {}
-
-# === Вопросы для сбора информации ===
-INFO_QUESTIONS = [
-    "✍️ Пришли свою распаковку личности и экспертности.\n💡 Это описание твоих ценностей, опыта и уникальности.",
-    "🔥 Отлично! Теперь пришли своё позиционирование.\n💡 Чем ты занимаешься и для кого?",
-    "✅ Теперь пришли краткую характеристику продукта/услуги.\n💡 Опиши, что ты предлагаешь, чем это полезно клиенту.",
-    "📌 Пришли анализ твоей ЦА.\n💡 Опиши, кто твоя аудитория, их боли, страхи, желания."
-]
-
-# === /start ===
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    args = context.args
-
-    # ✅ Админ всегда проходит проверку
-    if user_id == ADMIN_ID:
-        await update.message.reply_text("👑 Привет, админ! Ты уже имеешь полный доступ.")
-        keyboard = [[InlineKeyboardButton("СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-        WELCOME_MSG = (
-            "👋 Привет! Ты в боте «Контент-ассистент».\n\n"
-            "Он поможет:\n"
-            "• составить контент-план\n"
-            "• написать пост или Reels\n"
-            "• упаковать продукт\n\n"
-            "🔐 Чтобы начать, подтверди согласие с "
-            "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link) "
-            "и [Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link).\n\n"
-            "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!",
-            reply_markup = InlineKeyboardMarkup(kb)
+    await update.message.reply_text(
+        WELCOME,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
         )
-        return
-
-    # --- Проверка токена для обычных пользователей ---
-    if args:
-        token = args[0]
-        cur.execute("SELECT user_id FROM tokens WHERE token=? AND bot_name=?", (token, BOT_NAME))
-        row = cur.fetchone()
-        if row and row[0] == user_id:
-            cur.execute("INSERT INTO allowed_users(user_id, bot_name) VALUES(?, ?)", (user_id, BOT_NAME))
-            cur.execute("DELETE FROM tokens WHERE token=?", (token,))
-            conn.commit()
-            await update.message.reply_text("✅ Доступ активирован! Можешь работать.")
-        else:
-            await update.message.reply_text("❌ Неверный или использованный токен.")
-        return
-
-    # --- Проверка доступа для обычных пользователей ---
-    if not is_allowed(user_id):
-        await update.message.reply_text("❌ У вас нет доступа. Купите доступ у администратора.")
-        return
-
-    # --- Приветствие для пользователей с доступом ---
-    keyboard = [[InlineKeyboardButton("СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-    WELCOME_MSG = (
-        "👋 Привет! Ты в боте «Контент-ассистент».\n\n"
-        "Он поможет:\n"
-        "• составить контент-план\n"
-        "• написать пост или Reels\n"
-        "• упаковать продукт\n\n"
-        "🔐 Чтобы начать, подтверди согласие с "
-        "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit?usp=drive_link) "
-        "и [Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit?usp=drive_link).\n\n"
-        "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!"
     )
 
-# === button_handler ===
+# === Обработчик нажатий кнопок ===
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.callback_query.from_user.id
-    if not is_allowed(user_id):
-        await update.callback_query.answer("❌ У вас нет доступа.")
-        return
-
     query = update.callback_query
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        await query.answer("❌ У вас нет доступа.", show_alert=True)
+        return
     await query.answer()
-
-    session = sessions.setdefault(user_id, {"state": None, "step": 0, "data": {}, "products": []})
-    
-    sessions[user_id].update({
-        "stage": "welcome",
-        "answers": [],
-        "product_answers": [],
-        "products": []
+    session = sessions.setdefault(user_id, {
+        "state": None,
+        "step": 0,
+        "data": {},
+        "products": [],
+        "audience_segments": [],
+        "planner": {},
+        "reels_data": [],
+        "copy_data": []
     })
-    kb = [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
-    await context.bot.send_message(chat_id=user_id, text=WELCOME_MSG, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
-    
+    data = session["data"]
+
     # --- Согласие ---
     if query.data == "agree":
         kb = [
             [InlineKeyboardButton("ДА ✅", callback_data="base_yes")],
             [InlineKeyboardButton("НЕТ ❌", callback_data="base_no")]
         ]
-        await query.edit_message_text("Есть ли у тебя уже основа (распаковка, позиционирование, анализ ЦА)?",
-                                      reply_markup=InlineKeyboardMarkup(kb))
-
-    # --- Пользователь уже имеет основу ---
+        await query.edit_message_text(
+            "Есть ли у тебя уже основа (распаковка, позиционирование, анализ ЦА)?",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+    # --- Пользователь имеет основу ---
     elif query.data == "base_yes":
-        session["state"] = "collecting_base_info"
-        session["step"] = 0
-        session["data"] = {"info": [], "products": []}
+        session.update({"state": "collecting_base_info", "step": 0, "data": {"info": [], "products": []}})
         await query.edit_message_text(INFO_QUESTIONS[0])
-    
-    # --- После получения характеристики продукта ---
-    elif query.data == "ask_more_products":
-        kb = [
-            [InlineKeyboardButton("Да ✅", callback_data="add_product")],
-            [InlineKeyboardButton("Нет ❌", callback_data="no_more_products")]
-        ]
-        await query.edit_message_text("🛍️ У тебя есть ещё продукт или услуга?", reply_markup=InlineKeyboardMarkup(kb))
-
-    # --- Пользователь не имеет основу ---
+    # --- Нет основы ---
     elif query.data == "base_no":
         kb = [
-            [InlineKeyboardButton("Заполнить данные здесь", callback_data="fill_here")],
-            [InlineKeyboardButton("Использовать бота «Распаковка ЦА»", callback_data="use_other_bot")]
+            [InlineKeyboardButton("Заполнить здесь", callback_data="fill_here")],
+            [InlineKeyboardButton("Использовать другой бот", callback_data="use_other_bot")]
         ]
-        await query.edit_message_text("❗ Давай соберём её прямо здесь:", reply_markup=InlineKeyboardMarkup(kb))
-
-    elif query.data == "use_other_bot":
-        await query.edit_message_text("🤖 [Ссылка на бота по распаковке] (в разработке).")
-
+        await query.edit_message_text(
+            "Давай соберём основу прямо здесь:",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
     elif query.data == "fill_here":
-        session["state"] = "collecting_base_info"
-        session["step"] = 0
+        session.update({"state": "collecting_base_info", "step": 0})
         await query.edit_message_text(INFO_QUESTIONS[0])
-
-    # --- Добавление продуктов ---
+    elif query.data == "use_other_bot":
+        await query.edit_message_text("🤖 Бот по распаковке в разработке.")
+    # --- Сбор продуктов ---
     elif query.data == "add_product":
         session["state"] = "collecting_more_products"
-        await query.edit_message_text("✍️ Пришли характеристику следующего продукта/услуги.")
-
+        await query.edit_message_text("✍️ Пришли характеристику следующего продукта.")
     elif query.data == "no_more_products":
         session["state"] = "collecting_audience_multiple"
-        session["audience_segments"] = []
-        await query.edit_message_text("📌 Отлично! Теперь пришли первый сегмент анализа твоей ЦА.")
-
+        await query.edit_message_text("📌 Пришли первый сегмент анализа ЦА.")
+    # --- Сбор сегментов ЦА ---
     elif query.data == "add_audience_segment":
         session["state"] = "collecting_audience_multiple"
         await query.edit_message_text("✍️ Пришли следующий сегмент анализа ЦА.")
-
     elif query.data == "audience_done":
-        session["data"]["audience"] = "\n\n".join(session.get("audience_segments", []))
-        kb = [[InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
-             [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]]
-        await query.edit_message_text("✅ Анализ ЦА собран. Хочешь добавить дополнительную информацию?",
-                                  reply_markup=InlineKeyboardMarkup(kb))
-                                  
-    # --- Доп.инфо ---
+        data["extra_info"] = "\n\n".join(session.get("audience_segments", []))
+        kb = [
+            [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
+            [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]
+        ]
+        await query.edit_message_text(
+            "✅ Анализ ЦА собран. Добавить дополнительную информацию?",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+    # --- Доп. информация ---
     elif query.data == "add_extra_info":
         session["state"] = "waiting_extra_info"
         await query.edit_message_text("✍️ Пришли дополнительную информацию по ЦА.")
-
     elif query.data == "no_extra_info":
         session["state"] = "menu_roles"
-        kb = [[InlineKeyboardButton("Перейти к выбору роли", callback_data="roles_menu")]]
-        await query.edit_message_text("✅ Информация собрана. Переходим к ролям:", reply_markup=InlineKeyboardMarkup(kb))
-
+        kb = [[InlineKeyboardButton("Перейти к ролям", callback_data="roles_menu")]]
+        await query.edit_message_text("✅ Информация получена! Переходим к ролям.", reply_markup=InlineKeyboardMarkup(kb))
     # --- Меню ролей ---
     elif query.data == "roles_menu":
         kb = [
-            [InlineKeyboardButton("📅 Контент-планировщик", callback_data="role_planner")],
+            [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
             [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
-            [InlineKeyboardButton("🎬 Продюсер Reels", callback_data="role_reels")]
+            [InlineKeyboardButton("🎬 Reels", callback_data="role_reels")]
         ]
-        await query.edit_message_text("📌 Выбери, чем я могу помочь:", reply_markup=InlineKeyboardMarkup(kb))
         session["state"] = "menu_roles"
+        await query.edit_message_text("Выбери роль:", reply_markup=InlineKeyboardMarkup(kb))
 
     # === Копирайтер ===
     elif query.data == "role_copywriter":
