@@ -191,6 +191,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✍️ Пришли следующий сегмент анализа ЦА.")
 
     elif query.data == "audience_done":
+        data = session.setdefault("data", {})
         data["extra_info"] = "\n\n".join(session.get("audience_segments", []))
         kb = [
             [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
@@ -565,5 +566,4 @@ if __name__ == "__main__":
 
     print("🚀 Бот запущен! Ждём пользователей...")
     app.run_polling()
-	
 	
