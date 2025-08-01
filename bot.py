@@ -588,7 +588,19 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("🤔 Я не понял команду. Нажми /start, чтобы начать заново.")
 
-# === запуск бота (фикс event loop для Render) ===
+# === Асинхронный запуск бота ===
+async def main():
+    await disable_webhook()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("gentoken", gentoken))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.ALL, any_message))
+    print("🚀 Бот запущен! Ждём пользователей...")
+    await app.run_polling()
+
+# === Запуск для Render (универсальный фикс event loop) ===
 if __name__ == "__main__":
     import asyncio
     try:
@@ -596,22 +608,7 @@ if __name__ == "__main__":
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-
     try:
         loop.run_until_complete(main())
     except (KeyboardInterrupt, SystemExit):
         print("⛔ Бот остановлен вручную.")
-
-# === Асинхронный запуск бота ===
-async def main():
-    await disable_webhook()
-
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("gentoken", gentoken))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.ALL, any_message))
-
-    print("🚀 Бот запущен! Ждём пользователей...")
-    await app.run_polling()
