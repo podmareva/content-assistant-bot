@@ -235,6 +235,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["state"] = "planner_goal"
         session["planner_data"] = []
         await query.edit_message_text("🎯 Укажи главную цель контент-плана.")
+		return
 
     # === Копирайтер ===
     elif query.data == "role_copywriter":
@@ -414,21 +415,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["planner_data"] = [text]
         session["state"] = "planner_platform"
         await update.message.reply_text("2️⃣ Укажи основную соцсеть.")
+		return
 
     elif session["state"] == "planner_platform":
         session["planner_data"].append(text)
         session["state"] = "planner_frequency"
         await update.message.reply_text("3️⃣ Укажи частоту публикаций (пример: сторис ежедневно, рилс 3 раза в неделю).")
+		return
 
     elif session["state"] == "planner_frequency":
         session["planner_data"].append(text)
         session["state"] = "planner_face"
         await update.message.reply_text("4️⃣ От чьего лица вести (1 лицо / бренд)?")
+		return
 
     elif session["state"] == "planner_face":
         session["planner_data"].append(text)
         session["state"] = "planner_days"
-        await update.message.reply_text("5️⃣ На какой срок нужен план? (7 / 10 / 30 дней)")
+        await update.message.reply_text("5️⃣ На какой срок нужен план? (7 / 14 / 21 день)")
+		return
 
     elif session["state"] == "planner_days":
         session["planner_data"].append(text)
