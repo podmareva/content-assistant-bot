@@ -600,15 +600,23 @@ async def main():
     print("🚀 Бот запущен! Ждём пользователей...")
     await app.run_polling()
 
-# === Запуск для Render (универсальный фикс event loop) ===
+# === Универсальный запуск для Render (без закрытия event loop) ===
+import asyncio
+
 if __name__ == "__main__":
-    import asyncio
     try:
+        # 🔹 Пробуем запустить через уже существующий цикл
         loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # 🚀 Render уже крутит цикл → создаём задачу
+            loop.create_task(main())
+            loop.run_forever()
+        else:
+            loop.run_until_complete(main())
     except RuntimeError:
+        # 🔹 Если цикла нет → создаём новый
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    try:
         loop.run_until_complete(main())
     except (KeyboardInterrupt, SystemExit):
         print("⛔ Бот остановлен вручную.")
