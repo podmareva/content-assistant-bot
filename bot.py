@@ -153,8 +153,63 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(kb)
         )
 
-    # --- Сбор данных (остальной код без изменений) ---
-    # (сюда вставляется твой оригинальный сбор данных)
+    # --- Пользователь имеет основу ---
+    elif query.data == "base_yes":
+        session.update({"state": "collecting_base_info", "step": 0, "data": {"info": [], "products": []}})
+        await query.edit_message_text(INFO_QUESTIONS[0])
+
+    # --- Нет основы ---
+    elif query.data == "base_no":
+        kb = [
+            [InlineKeyboardButton("Заполнить здесь", callback_data="fill_here")],
+            [InlineKeyboardButton("Использовать другой бот", callback_data="use_other_bot")]
+        ]
+        await query.edit_message_text(
+            "Давай соберём основу прямо здесь:",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+
+    elif query.data == "fill_here":
+        session.update({"state": "collecting_base_info", "step": 0})
+        await query.edit_message_text(INFO_QUESTIONS[0])
+
+    elif query.data == "use_other_bot":
+        await query.edit_message_text("🤖 Бот по распаковке в разработке.")
+
+    # --- Сбор продуктов ---
+    elif query.data == "add_product":
+        session["state"] = "collecting_more_products"
+        await query.edit_message_text("✍️ Пришли характеристику следующего продукта.")
+
+    elif query.data == "no_more_products":
+        session["state"] = "collecting_audience_multiple"
+        await query.edit_message_text("📌 Пришли первый сегмент анализа ЦА.")
+
+    # --- Сегменты ЦА ---
+    elif query.data == "add_audience_segment":
+        session["state"] = "collecting_audience_multiple"
+        await query.edit_message_text("✍️ Пришли следующий сегмент анализа ЦА.")
+
+    elif query.data == "audience_done":
+        data["extra_info"] = "\n\n".join(session.get("audience_segments", []))
+        kb = [
+            [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
+            [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]
+        ]
+        await query.edit_message_text(
+            "✅ Анализ ЦА собран. Добавить дополнительную информацию?",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+
+    # --- Доп. информация ---
+    elif query.data == "add_extra_info":
+        session["state"] = "waiting_extra_info"
+        await query.edit_message_text("✍️ Пришли дополнительную информацию по ЦА.")
+
+    elif query.data == "no_extra_info":
+        session["state"] = "menu_roles"
+        kb = [[InlineKeyboardButton("Перейти к ролям", callback_data="roles_menu")]]
+        await query.edit_message_text("✅ Информация получена! Переходим к ролям.", reply_markup=InlineKeyboardMarkup(kb))
 
     # --- Главное меню помощников ---
     elif query.data == "roles_menu":
@@ -510,4 +565,5 @@ if __name__ == "__main__":
 
     print("🚀 Бот запущен! Ждём пользователей...")
     app.run_polling()
+	
 	
