@@ -591,11 +591,9 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === запуск бота (фикс event loop для Render) ===
 if __name__ == "__main__":
     import asyncio
-
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
-        # 🔥 Render не даёт текущий цикл → создаём свой
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -603,3 +601,17 @@ if __name__ == "__main__":
         loop.run_until_complete(main())
     except (KeyboardInterrupt, SystemExit):
         print("⛔ Бот остановлен вручную.")
+
+# === Асинхронный запуск бота ===
+async def main():
+    await disable_webhook()
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("gentoken", gentoken))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.ALL, any_message))
+
+    print("🚀 Бот запущен! Ждём пользователей...")
+    await app.run_polling()
