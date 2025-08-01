@@ -589,34 +589,27 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🤔 Я не понял команду. Нажми /start, чтобы начать заново.")
 
 # === Асинхронный запуск бота ===
+# === Асинхронный запуск бота (фикс для Render) ===
 async def main():
     await disable_webhook()
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("gentoken", gentoken))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.ALL, any_message))
-    print("🚀 Бот запущен! Ждём пользователей...")
-    await app.run_polling()
 
-# === Универсальный запуск для Render (без закрытия event loop) ===
-import asyncio
+    print("🚀 Бот запущен! Ждём пользователей...")
+
+    # 🔹 Вместо app.run_polling() — ручной запуск без закрытия event loop
+    await app.initialize()
+    await app.start()
+    await asyncio.Event().wait()  # держим бота в работе бесконечно
 
 if __name__ == "__main__":
+    import asyncio
     try:
-        # 🔹 Пробуем запустить через уже существующий цикл
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # 🚀 Render уже крутит цикл → создаём задачу
-            loop.create_task(main())
-            loop.run_forever()
-        else:
-            loop.run_until_complete(main())
-    except RuntimeError:
-        # 🔹 Если цикла нет → создаём новый
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(main())
+        asyncio.run(main())  # теперь безопасно
     except (KeyboardInterrupt, SystemExit):
         print("⛔ Бот остановлен вручную.")
