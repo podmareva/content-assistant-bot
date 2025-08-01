@@ -578,7 +578,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("Вернуться к ролям", callback_data="roles_menu")]]
         await update.message.reply_text("✅ Сценарий готов!", reply_markup=InlineKeyboardMarkup(kb))
 
-# === Общий хендлер для непонятных сообщений ===
+# === Общий хендлер для всех других сообщений (если что-то не распознано) ===
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_allowed(user_id):
@@ -590,9 +590,14 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # Команды
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("gentoken", gentoken))
+    app.add_handler(CommandHandler("gentoken", gentoken))  # только для админа
+
+    # Callback кнопки
     app.add_handler(CallbackQueryHandler(button_handler))
+
+    # Сообщения
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.ALL, any_message))
 
