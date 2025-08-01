@@ -455,6 +455,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("Вернуться к помощникам", callback_data="roles_menu")]]
         await update.message.reply_text("✅ Сценарий готов!", reply_markup=InlineKeyboardMarkup(kb))
 
+# === Генерация токена (для выдачи доступа пользователям) ===
+async def gentoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    # Только администратор может выдавать токены
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Нет прав.")
+        return
+
+    # Проверяем, указан ли user_id
+    if not context.args:
+        await update.message.reply_text("⚠️ Используй: /gentoken <user_id>")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Некорректный user_id.")
+        return
+
+    # Генерируем токен
+    token = secrets.token_hex(4)
+    cur.execute("INSERT INTO tokens(token, bot_name, user_id) VALUES(?, ?, ?)", (token, BOT_NAME, target_id))
+    conn.commit()
+
+    # Отправляем ссылку пользователю
+    link = f"https://t.me/{BOT_NAME}?start={token}"
+    await update.message.reply_text(f"✅ Токен для {target_id}:\n{token}\n{link}")
+
 # === Хендлер неизвестных сообщений ===
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
