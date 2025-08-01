@@ -617,4 +617,5 @@ async def main():
 
 # === Запуск ===
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.get_event_loop().create_task(main())
+    asyncio.get_event_loop().run_forever()
