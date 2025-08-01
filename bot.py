@@ -617,5 +617,14 @@ async def main():
 
 # === Запуск ===
 if __name__ == "__main__":
-    asyncio.get_event_loop().create_task(main())
-    asyncio.get_event_loop().run_forever()
+    import nest_asyncio
+    import asyncio
+    nest_asyncio.apply()
+
+    try:
+        asyncio.get_event_loop().run_until_complete(main())
+    except RuntimeError:
+        # Если цикл уже идёт (Render), просто создаём задачу
+        loop = asyncio.get_event_loop()
+        loop.create_task(main())
+        loop.run_forever()
