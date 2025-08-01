@@ -1,7 +1,7 @@
 import os
 import sys
 import sqlite3
-import asyncio   # ✅ Должен быть обязательно
+import asyncio
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -63,6 +63,13 @@ def is_allowed(user_id: int) -> bool:
     )
     return cur.fetchone() is not None
 
+# === Отключение Webhook (Render-friendly) ===
+async def disable_webhook():
+    from telegram import Bot
+    bot = Bot(BOT_TOKEN)
+    await bot.delete_webhook()
+    print("✅ Webhook отключен → Polling активен")
+
 # === Генерация токена (для админа) ===
 async def gentoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -119,6 +126,7 @@ WELCOME = (
     "(https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit).\n\n"
     "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!"
 )
+
 INFO_QUESTIONS = [
     "✍️ Пришли свою распаковку личности и экспертности.",
     "🔥 Отлично! Теперь пришли своё позиционирование.",
@@ -157,7 +165,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     )
 
-# === Обработчик нажатий кнопок ===
+# === Обработчик кнопок ===
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -244,8 +252,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "no_extra_info":
         session["state"] = "menu_roles"
-        kb = [[InlineKeyboardButton("Перейти к ролям", callback_data="roles_menu")]]
-        await query.edit_message_text("✅ Информация получена! Переходим к ролям.", reply_markup=InlineKeyboardMarkup(kb))
+        kb = [[InlineKeyboardButton("Перейти к помощникам", callback_data="roles_menu")]]
+        await query.edit_message_text("✅ Информация получена! Переходим к помощникам.", reply_markup=InlineKeyboardMarkup(kb))
 
     # === Меню помощников ===
     elif query.data == "roles_menu":
@@ -308,16 +316,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["state"] = "reels_topic"
         session["reels_data"] = []
         await query.edit_message_text("🎬 Укажи тему и цель ролика.")
-  
-  # 🔹 Сессия пользователя
-    session = sessions.setdefault(user_id, {"state": None, "step": 0, "data": {}, "products": []})
-    text = update.message.text
 
-    # === Сбор основной информации ===
+# === ОБРАБОТКА СООБЩЕНИЙ ОТ ПОЛЬЗОВАТЕЛЯ ===
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_allowed(user_id):
+        await update.message.reply_text("❌ У вас нет доступа.")
+        return
+
+    session = sessions.setdefault(user_id, {
+        "state": None, "step": 0, "data": {}, "products": [],
+        "audience_segments": [], "planner_data": [], "copy_data": [], "reels_data": []
+    })
+    text = update.message.text
+    print(f"📩 [{user_id}] → {text}")
+
+    # === СБОР БАЗОВОЙ ИНФОРМАЦИИ ===
     if session["state"] == "collecting_base_info":
         step = session["step"]
         session["data"].setdefault("info", []).append(text)
-        session["step"] = step + 1
+        session["step"] += 1
 
         if session["step"] == 3:
             kb = [[InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
@@ -335,7 +353,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                             reply_markup=InlineKeyboardMarkup(kb))
             session["state"] = "awaiting_extra"
 
-    # === Дополнительные продукты ===
+    # === ДОПОЛНИТЕЛЬНЫЕ ПРОДУКТЫ ===
     elif session["state"] == "collecting_more_products":
         session["products"].append(text)
         kb = [[InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
@@ -343,25 +361,99 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Продукт добавлен. Добавить ещё?",
                                         reply_markup=InlineKeyboardMarkup(kb))
 
-    # === Сегменты ЦА ===
+    # === СЕГМЕНТЫ ЦА ===
     elif session["state"] == "collecting_audience_multiple":
         session["data"].setdefault("audience_segments", []).append(text)
-        kb = [
-            [InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
-            [InlineKeyboardButton("Закончить", callback_data="audience_done")]
-        ]
-        await update.message.reply_text("✅ Сегмент добавлен. Хочешь добавить ещё один сегмент ЦА?",
+        kb = [[InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
+              [InlineKeyboardButton("Закончить", callback_data="audience_done")]]
+        await update.message.reply_text("✅ Сегмент добавлен. Хочешь добавить ещё?",
                                         reply_markup=InlineKeyboardMarkup(kb))
 
-    # === Доп. информация ===
+    # === ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ ===
     elif session["state"] == "waiting_extra_info":
         session["data"]["extra_info"] = text
-        kb = [[InlineKeyboardButton("Перейти к ролям", callback_data="roles_menu")]]
-        await update.message.reply_text("✅ Доп.информация получена. Переходим к ролям.",
+        kb = [[InlineKeyboardButton("Перейти к помощникам", callback_data="roles_menu")]]
+        await update.message.reply_text("✅ Доп.информация получена. Переходим к помощникам.",
                                         reply_markup=InlineKeyboardMarkup(kb))
         session["state"] = "menu_roles"
 
-    # === Диалог Копирайтера ===
+    # === ПЛАНИРОВЩИК (СБОР ДАННЫХ) ===
+    elif session["state"] == "planner_goal":
+        session["planner_data"] = [text]
+        session["state"] = "planner_platform"
+        await update.message.reply_text("2️⃣ Укажи основную соцсеть.")
+
+    elif session["state"] == "planner_platform":
+        session["planner_data"].append(text)
+        session["state"] = "planner_frequency"
+        await update.message.reply_text("3️⃣ Укажи частоту публикаций.")
+
+    elif session["state"] == "planner_frequency":
+        session["planner_data"].append(text)
+        session["state"] = "planner_face"
+        await update.message.reply_text("4️⃣ От чьего лица вести контент? (личный / бренд)")
+
+    elif session["state"] == "planner_face":
+        session["planner_data"].append(text)
+        session["state"] = "planner_days"
+        await update.message.reply_text("5️⃣ На какой срок нужен план? (7 / 10 / 30 дней)")
+
+    elif session["state"] == "planner_days":
+        session["planner_data"].append(text)
+        goal, platform, freq, face, days = session["planner_data"]
+        context_text = get_user_context(session)
+
+        # === ПОЛНЫЙ ПРОМТ ПЛАНИРОВЩИКА ===
+        prompt = (
+            f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный контент-план.\n\n"
+            f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
+            f"🎯 Цель: {goal}\n"
+            f"📌 Платформа: {platform}\n"
+            f"📅 Срок: {days} дней\n"
+            f"🗓 Частота публикаций: {freq}\n"
+            f"👤 От чьего лица вести: {face}\n\n"
+
+            "=== АНАЛИЗ ЦЕЛЕВОЙ АУДИТОРИИ ===\n"
+            "Пользователь прислал несколько сегментов ЦА. "
+            "Для каждого дня указывай, для какого сегмента подходит контент (или для нескольких). "
+            "Обязательно используй данные сегментов, а не пиши общие советы.\n\n"
+
+            "=== ТРЕБОВАНИЯ К ПЛАНУ ===\n"
+            "– Каждый день должен включать: сторис + (или рилс / пост-карусель)\n"
+            "– Укажи для каждого дня: тему, формат, цель, CTA, идеи сторис, визуальные подсказки\n"
+            "– Раздели контент по рубрикатору: экспертность, вовлечение, личное, кейсы, продажи\n"
+            "– Привяжи каждый день к этапу воронки: холодная, тёплая, горячая аудитория\n"
+            "– Добавляй пометку [Сегмент ЦА: ...] для каждого элемента контента\n\n"
+
+            "=== ФОРМАТ ВЫВОДА ===\n"
+            "День 1:\n• Сторис – тема, идея, CTA [Сегмент ЦА: сегмент1]\n• Рилс/Пост – тема, формат, краткий сценарий, CTA [Сегмент ЦА: сегмент2]\n\n"
+            "День 2:\n• … (и так далее для всех дней)\n\n"
+
+            "=== СПЕЦИФИКА ===\n"
+            "– План должен быть практичным, а не общими советами\n"
+            "– Учитывай возможности автора (если публикаций мало – оптимизируй)\n"
+            "– Используй форматы 2024–2025: Reels, сторис, карусели, behind-the-scenes\n"
+            "– Добавляй конкретные идеи для визуала, интерактивов, опросов\n\n"
+
+            "⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ отт07.04.2025, исключи запрещённые обещания, используй корректные формулировки.\n"
+            "Выдай план в структурированном виде, по дням, без сокращений «и так далее»."
+        )
+		
+        await update.message.reply_text("📅 Формирую контент-план, подожди...")
+        try:
+            response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
+                                                    messages=[{"role": "user", "content": prompt}])
+            result = sanitize_ad_text(response["choices"][0]["message"]["content"])
+            await send_long_message(update.effective_chat.id, result, context)
+        except Exception as e:
+            await update.message.reply_text("⚠️ Ошибка генерации плана.")
+            print("Planner Error:", e)
+
+        session["state"] = "menu_roles"
+        kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+        await update.message.reply_text("✅ План готов!", reply_markup=InlineKeyboardMarkup(kb))
+
+    # === КОПИРАЙТЕР (СБОР ДАННЫХ И ГЕНЕРАЦИЯ) ===
     elif session["state"].startswith("copywriter_"):
         step = session.get("step", 0)
         session["copy_data"].append(text)
@@ -377,7 +469,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             goal, topic, tone, length = session["copy_data"]
             context_text = get_user_context(session)
 
-            # 🟢 ВОССТАНОВЛЕН ПОЛНЫЙ ПРОМТ КОПИРАЙТЕРА (как в твоём оригинале)
+            # === ПОЛНЫЙ ПРОМТ КОПИРАЙТЕРА ===
             prompt = (
                 f"Ты профессиональный копирайтер и упаковщик. Создай {session['task']} для блогера/эксперта/бренда.\n\n"
                 f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
@@ -422,104 +514,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "⚖️ Соблюдай Федеральный закон №38-ФЗ и №72-ФЗ от 07.04.2025: "
                 "не используй фразы «100% результат», «лучший», «гарантировано», "
                 "заменяй их корректными альтернативами: «один из популярных вариантов», «подходит для…», «узнай подробнее».\n\n"
+
                 "💡 Выдай текст в структурированном виде, готовый к публикации."
             )
-
-            await update.message.reply_text("✍️ Пишу текст, подожди...")
+			
+            await update.message.reply_text("✍️ Генерирую текст, подожди...")
             try:
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}]
-                )
+                response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
+                                                        messages=[{"role": "user", "content": prompt}])
                 result = sanitize_ad_text(response["choices"][0]["message"]["content"])
                 await send_long_message(update.effective_chat.id, result, context)
             except Exception as e:
                 await update.message.reply_text("⚠️ Ошибка генерации текста.")
-                print("OpenAI Error:", e)
+                print("Copywriter Error:", e)
 
             session["state"] = "menu_roles"
             session["step"] = 0
-            kb = [[InlineKeyboardButton("Вернуться к ролям", callback_data="roles_menu")]]
-            await update.message.reply_text("✅ Готово!", reply_markup=InlineKeyboardMarkup(kb))
+            kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+            await update.message.reply_text("✅ Текст готов!", reply_markup=InlineKeyboardMarkup(kb))
 
-    # === Планировщик контента ===
-    elif session["state"] == "planner_goal":
-        session["planner_data"] = [text]
-        session["state"] = "planner_platform"
-        await update.message.reply_text("2️⃣ Укажи основную соцсеть.")
-
-    elif session["state"] == "planner_platform":
-        session["planner_data"].append(text)
-        session["state"] = "planner_frequency"
-        await update.message.reply_text("3️⃣ Укажи частоту публикаций (пример: сторис ежедневно, рилс 3 раза в неделю).")
-
-    elif session["state"] == "planner_frequency":
-        session["planner_data"].append(text)
-        session["state"] = "planner_face"
-        await update.message.reply_text("4️⃣ От чьего лица вести (1 лицо / бренд)?")
-
-    elif session["state"] == "planner_face":
-        session["planner_data"].append(text)
-        session["state"] = "planner_days"
-        await update.message.reply_text("5️⃣ На какой срок нужен план? (7 / 10 / 30 дней)")
-
-    elif session["state"] == "planner_days":
-        session["planner_data"].append(text)
-        goal, platform, freq, face, days = session["planner_data"]
-        context_text = get_user_context(session)
-
-        # 🟢 ВОССТАНОВЛЕН ПОЛНЫЙ ПРОМТ ПЛАНИРОВЩИКА
-        prompt = (
-            f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный контент-план.\n\n"
-            f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
-            f"🎯 Цель: {goal}\n📌 Платформа: {platform}\n📅 Срок: {days} дней\n"
-            f"🗓 Частота публикаций: {freq}\n👤 От чьего лица вести: {face}\n\n"
-
-            "=== АНАЛИЗ ЦЕЛЕВОЙ АУДИТОРИИ ===\n"
-            "Пользователь прислал несколько сегментов ЦА. "
-            "Для каждого дня указывай, для какого сегмента подходит контент (или для нескольких). "
-            "Обязательно используй данные сегментов, а не пиши общие советы.\n\n"
-
-            "=== ТРЕБОВАНИЯ К ПЛАНУ ===\n"
-            "– Каждый день должен включать: сторис + (или рилс / пост-карусель)\n"
-            "– Укажи для каждого дня: тему, формат, цель, CTA, идеи сторис, визуальные подсказки\n"
-            "– Раздели контент по рубрикатору: экспертность, вовлечение, личное, кейсы, продажи\n"
-            "– Привяжи каждый день к этапу воронки: холодная, тёплая, горячая аудитория\n"
-            "– Добавляй пометку [Сегмент ЦА: ...] для каждого элемента контента\n\n"
-
-            "=== ФОРМАТ ВЫВОДА ===\n"
-            "День 1:\n• Сторис – тема, идея, CTA [Сегмент ЦА: сегмент1]\n• Рилс/Пост – тема, формат, краткий сценарий, CTA [Сегмент ЦА: сегмент2]\n\n"
-            "День 2:\n• … (и так далее для всех дней)\n\n"
-
-            "=== СПЕЦИФИКА ===\n"
-            "– План должен быть практичным, а не общими советами\n"
-            "– Учитывай возможности автора (если публикаций мало – оптимизируй)\n"
-            "– Используй форматы 2024–2025: Reels, сторис, карусели, behind-the-scenes\n"
-            "– Добавляй конкретные идеи для визуала, интерактивов, опросов\n\n"
-
-            "⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ, исключи запрещённые обещания, используй корректные формулировки.\n"
-            "Выдай план в структурированном виде, по дням, без сокращений «и так далее»."
-        )
-
-        await update.message.reply_text("📅 Формирую контент-план, подожди...")
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            result = sanitize_ad_text(response["choices"][0]["message"]["content"])
-            await send_long_message(update.effective_chat.id, result, context)
-        except Exception as e:
-            await update.message.reply_text("⚠️ Ошибка генерации плана.")
-            print("Planner Error:", e)
-
-        session["state"] = "menu_roles"
-        kb = [[InlineKeyboardButton("Вернуться к ролям", callback_data="roles_menu")]]
-        await update.message.reply_text("✅ План готов!", reply_markup=InlineKeyboardMarkup(kb))
-
-    # === Продюсер Reels ===
+    # === REELS (СБОР ДАННЫХ И ГЕНЕРАЦИЯ) ===
     elif session["state"] == "reels_topic":
-        session["reels_data"].append(text)
+        session["reels_data"] = [text]
         session["state"] = "reels_format"
         await update.message.reply_text("2️⃣ Укажи формат: с лицом / без лица / монтаж.")
 
@@ -538,12 +554,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic, format_r, style, music = session["reels_data"]
         context_text = get_user_context(session)
 
-        # 🟢 ВОССТАНОВЛЕН ПОЛНЫЙ ПРОМТ REELS
+        # === ПОЛНЫЙ ПРОМТ REELS ===
         prompt = (
             f"Ты профессиональный продюсер коротких видео (Reels, TikTok, Shorts, ВК-клипы). "
             f"Создай сценарий для видео по данным пользователя.\n\n"
             f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
-            f"🎯 Тема ролика: {topic}\n📹 Формат: {format_r} (с лицом / без лица / монтаж)\n🎨 Стиль: {style}\n🎵 Музыка/референс: {music}\n\n"
+            f"🎯 Тема ролика: {topic}\n"
+            f"📹 Формат: {format_r} (с лицом / без лица / монтаж)\n"
+            f"🎨 Стиль: {style}\n"
+            f"🎵 Музыка/референс: {music}\n\n"
 
             "=== ОБЯЗАТЕЛЬНАЯ СТРУКТУРА СЦЕНАРИЯ ===\n"
             "1️⃣ Хук (2–3 секунды, мощный захват внимания)\n"
@@ -562,13 +581,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "не используй необоснованные обещания («100% результат», «лучший», «гарантировано»), "
             "заменяй их корректными альтернативами («один из популярных вариантов», «подходит для…», «узнай подробнее»)."
         )
-
+		
         await update.message.reply_text("🎬 Генерирую сценарий, подожди...")
         try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}]
-            )
+            response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
+                                                    messages=[{"role": "user", "content": prompt}])
             result = sanitize_ad_text(response["choices"][0]["message"]["content"])
             await send_long_message(update.effective_chat.id, result, context)
         except Exception as e:
@@ -576,9 +593,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print("Reels Error:", e)
 
         session["state"] = "menu_roles"
-        kb = [[InlineKeyboardButton("Вернуться к ролям", callback_data="roles_menu")]]
+        kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
         await update.message.reply_text("✅ Сценарий готов!", reply_markup=InlineKeyboardMarkup(kb))
-
+		
 # === Хендлер неизвестных сообщений ===
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🤔 Не понял команду. Нажми /start для начала.")
@@ -588,14 +605,16 @@ async def main():
     await disable_webhook()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # === Регистрируем все хендлеры ===
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("gentoken", gentoken))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))  # ✅ handle_message уже определён выше
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.ALL, any_message))
 
     print("🚀 Бот запущен! Ждём пользователей...")
     await app.run_polling(close_loop=False)
 
+# === Запуск ===
 if __name__ == "__main__":
     asyncio.run(main())
