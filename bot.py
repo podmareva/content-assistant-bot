@@ -588,28 +588,17 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("🤔 Я не понял команду. Нажми /start, чтобы начать заново.")
 
-# === Асинхронный запуск бота (фикс event loop для Render) ===
-async def main():
-    # ✅ Отключаем старый Webhook перед запуском (исключаем конфликты polling)
-    await disable_webhook()
-
-    # ✅ Создаём приложение
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    # ✅ Регистрируем обработчики
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("gentoken", gentoken))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.ALL, any_message))
-
-    print("🚀 Бот запущен! Ждём пользователей...")
-    await app.run_polling()
-
-# === Запуск через существующий event loop (корректно для Render) ===
+# === запуск бота (фикс event loop для Render) ===
 if __name__ == "__main__":
     import asyncio
-    loop = asyncio.get_event_loop()
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        # 🔥 Render не даёт текущий цикл → создаём свой
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
     try:
         loop.run_until_complete(main())
     except (KeyboardInterrupt, SystemExit):
