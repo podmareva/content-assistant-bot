@@ -380,7 +380,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif session.get("state") == "planner_face":
         session["planner_data"].append(text)
         session["state"] = "planner_days"
-        await update.message.reply_text("5️⃣ На какой срок нужен план? (7 / 10 / 30 дней)")
+        await update.message.reply_text("5️⃣ На какой срок нужен план? (7 / 14 / 21 / 30 дней)")
 
     elif session.get("state") == "planner_days":
         session["planner_data"].append(text)
@@ -417,9 +417,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "– Учитывай возможности автора (если публикаций мало – оптимизируй)\n"
             "– Используй форматы 2024–2025: Reels, сторис, карусели, behind-the-scenes\n"
             "– Добавляй конкретные идеи для визуала, интерактивов, опросов\n\n"
+			"- 
 
             "⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025, исключи запрещённые обещания, используй корректные формулировки.\n"
-            "Выдай план в структурированном виде, по дням, без сокращений «и так далее»."
+            "⚠️ Выдавай результат блоками по 5 дней, без сокращений и без слов «и так далее».  После каждого блока пиши: "[продолжение следует]" и жди следующего запроса.  Сейчас сгенерируй только Дни 1–5 полностью."
         )
 
         await update.message.reply_text("📅 Формирую контент-план...")
@@ -428,7 +429,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 model="gpt-3.5-turbo",
                 max_tokens=4000,  # 🟢 увеличен лимит
                 temperature=0.7,
-                messages=[{"role": "user", "content": prompt + "\n\n⚠️ ВАЖНО: Не используй слова «и так далее». Выдай все {days} дней полностью, даже если ответ получится длинным. Разбей вывод на все дни по структуре."}]
+                messages=[{"role": "user", "content": prompt + "\n\n⚠️ ВАЖНО: Не используй слова «и так далее». Выдай все {days} дней полностью, даже если ответ получится длинным. Разбей вывод на все дни по структуре. Отправляй столько, сообщений, сколько потребуется, чтобы выдать все {days}."}]
             )
             result = sanitize_ad_text(response["choices"][0]["message"]["content"])
             await send_long_message(update.effective_chat.id, result, context)
