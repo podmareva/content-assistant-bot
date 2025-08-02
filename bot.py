@@ -192,7 +192,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     # === Сбор основной информации ===
-    if session["state"] == "collecting_base_info":
+    if isinstance(session, dict) and session.get("state") == "collecting_base_info":
         step = session["step"]
         session["data"].setdefault("info", []).append(text)
         session["step"] += 1
@@ -238,7 +238,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["state"] = "menu_roles"
 
     # === Диалог Копирайтера ===
-    elif session["state"].startswith("copywriter_"):
+    if isinstance(session, dict) and session.get("state", "").startswith("copywriter_"):
         step = session.get("step", 0)
         session["copy_data"].append(text)
         session["step"] = step + 1
@@ -317,7 +317,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Готово!", reply_markup=InlineKeyboardMarkup(kb))
 
     # === Планировщик ===
-    elif session["state"] == "planner_goal":
+    elif isinstance(session, dict) and session.get("state") == "planner_goal":
         session["planner_data"] = [text]
         session["state"] = "planner_platform"
         await update.message.reply_text("2️⃣ Укажи основную соцсеть.")
@@ -393,7 +393,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ План готов!", reply_markup=InlineKeyboardMarkup(kb))
 
     # === Reels ===
-    elif session["state"] == "reels_topic":
+    elif isinstance(session, dict) and session.get("state") == "reels_topic":
         session["reels_data"] = [text]
         session["state"] = "reels_format"
         await update.message.reply_text("2️⃣ Укажи формат: с лицом / без лица / монтаж.")
