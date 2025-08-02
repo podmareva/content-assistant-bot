@@ -383,68 +383,68 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("5️⃣ На какой срок нужен план? (7 / 14 / 21 / 30 дней)")
 
     elif session.get("state") == "planner_days":
-    session["planner_data"].append(text)
-    goal, platform, freq, face, days = session["planner_data"]
-    context_text = get_user_context(session)
+        session["planner_data"].append(text)
+        goal, platform, freq, face, days = session["planner_data"]
+        context_text = get_user_context(session)
 
-    await update.message.reply_text("📅 План будет сформирован поэтапно (по 5 дней за раз)...")
+        await update.message.reply_text("📅 План будет сформирован поэтапно (по 5 дней за раз)...")
 
-    try:
-        for block_start in range(1, int(days) + 1, 5):
-            block_end = min(block_start + 4, int(days))
+        try:
+            for block_start in range(1, int(days) + 1, 5):
+                block_end = min(block_start + 4, int(days))
 
-            prompt = (
-                f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный контент-план.\n\n"
-                f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
-                f"🎯 Цель: {goal}\n"
-                f"📌 Платформа: {platform}\n"
-                f"📅 Срок: {days} дней\n"
-                f"🗓 Частота публикаций: {freq}\n"
-                f"👤 От чьего лица вести: {face}\n\n"
+                prompt = (
+                    f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный контент-план.\n\n"
+                    f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
+                    f"🎯 Цель: {goal}\n"
+                    f"📌 Платформа: {platform}\n"
+                    f"📅 Срок: {days} дней\n"
+                    f"🗓 Частота публикаций: {freq}\n"
+                    f"👤 От чьего лица вести: {face}\n\n"
 
-                "=== АНАЛИЗ ЦЕЛЕВОЙ АУДИТОРИИ ===\n"
-                "Пользователь прислал несколько сегментов ЦА. "
-                "Для каждого дня указывай, для какого сегмента подходит контент (или для нескольких). "
-                "Обязательно используй данные сегментов, а не пиши общие советы.\n\n"
+                    "=== АНАЛИЗ ЦЕЛЕВОЙ АУДИТОРИИ ===\n"
+                    "Пользователь прислал несколько сегментов ЦА. "
+                    "Для каждого дня указывай, для какого сегмента подходит контент (или для нескольких). "
+                    "Обязательно используй данные сегментов, а не пиши общие советы.\n\n"
 
-                "=== ТРЕБОВАНИЯ К ПЛАНУ ===\n"
-                "– Каждый день должен включать: сторис + (или рилс / пост-карусель)\n"
-                "– Укажи для каждого дня: тему, формат, цель, CTA, идеи сторис, визуальные подсказки\n"
-                "– Раздели контент по рубрикатору: экспертность, вовлечение, личное, кейсы, продажи\n"
-                "– Привяжи каждый день к этапу воронки: холодная, тёплая, горячая аудитория\n"
-                "– Добавляй пометку [Сегмент ЦА: ...] для каждого элемента контента\n\n"
+                    "=== ТРЕБОВАНИЯ К ПЛАНУ ===\n"
+                    "– Каждый день должен включать: сторис + (или рилс / пост-карусель)\n"
+                    "– Укажи для каждого дня: тему, формат, цель, CTA, идеи сторис, визуальные подсказки\n"
+                    "– Раздели контент по рубрикатору: экспертность, вовлечение, личное, кейсы, продажи\n"
+                    "– Привяжи каждый день к этапу воронки: холодная, тёплая, горячая аудитория\n"
+                    "– Добавляй пометку [Сегмент ЦА: ...] для каждого элемента контента\n\n"
 
-                "=== ФОРМАТ ВЫВОДА ===\n"
-                "День 1:\n• Сторис – тема, идея, CTA [Сегмент ЦА: сегмент1]\n• Рилс/Пост – тема, формат, краткий сценарий, CTA [Сегмент ЦА: сегмент2]\n\n"
-                "День 2:\n• … (и так далее для всех дней)\n\n"
+                    "=== ФОРМАТ ВЫВОДА ===\n"
+                    "День 1:\n• Сторис – тема, идея, CTA [Сегмент ЦА: сегмент1]\n• Рилс/Пост – тема, формат, краткий сценарий, CTA [Сегмент ЦА: сегмент2]\n\n"
+                    "День 2:\n• … (и так далее для всех дней)\n\n"
 
-                "=== СПЕЦИФИКА ===\n"
-                "– План должен быть практичным, а не общими советами\n"
-                "– Учитывай возможности автора (если публикаций мало – оптимизируй)\n"
-                "– Используй форматы 2024–2025: Reels, сторис, карусели, behind-the-scenes\n"
-                "– Добавляй конкретные идеи для визуала, интерактивов, опросов\n\n"
+                    "=== СПЕЦИФИКА ===\n"
+                    "– План должен быть практичным, а не общими советами\n"
+                    "– Учитывай возможности автора (если публикаций мало – оптимизируй)\n"
+                    "– Используй форматы 2024–2025: Reels, сторис, карусели, behind-the-scenes\n"
+                    "– Добавляй конкретные идеи для визуала, интерактивов, опросов\n\n"
 
-                "⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025, исключи запрещённые обещания, используй корректные формулировки.\n"
-                "Выдай план в структурированном виде, по дням, без сокращений «и так далее»."
-            )
+                    "⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025, исключи запрещённые обещания, используй корректные формулировки.\n"
+                    "Выдай план в структурированном виде, по дням, без сокращений «и так далее»."
+                )
 
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                max_tokens=1800,
-                temperature=0.7,
-                messages=[{"role": "user", "content": prompt}]
-            )
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    max_tokens=1800,
+                    temperature=0.7,
+                    messages=[{"role": "user", "content": prompt}]
+                )
 
-            result = sanitize_ad_text(response["choices"][0]["message"]["content"])
-            await send_long_message(update.effective_chat.id, result, context)
+                result = sanitize_ad_text(response["choices"][0]["message"]["content"])
+                await send_long_message(update.effective_chat.id, result, context)
 
-    except Exception as e:
-        print("Planner Error:", e)
-        await update.message.reply_text("⚠️ Ошибка при генерации контент-плана.")
+        except Exception as e:
+            print("Planner Error:", e)
+            await update.message.reply_text("⚠️ Ошибка при генерации контент-плана.")
 
-    session["state"] = "menu_roles"
-    kb = [[InlineKeyboardButton("Вернуться к помощникам", callback_data="roles_menu")]]
-    await update.message.reply_text("✅ План готов!", reply_markup=InlineKeyboardMarkup(kb))
+        session["state"] = "menu_roles"
+        kb = [[InlineKeyboardButton("Вернуться к помощникам", callback_data="roles_menu")]]
+        await update.message.reply_text("✅ План готов!", reply_markup=InlineKeyboardMarkup(kb))
 
 
     # === Reels ===
