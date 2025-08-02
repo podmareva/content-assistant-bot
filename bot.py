@@ -429,6 +429,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025, исключи запрещённые обещания, используй корректные формулировки.\n"
             "⚠️ Генерируй только Дни {block_start}–{block_end}, не переходи к следующим."
         )
+		
+		response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        result = sanitize_ad_text(response["choices"][0]["message"]["content"])
+        await send_long_message(update.effective_chat.id, result, context)
+
+except Exception as e:
+    print("Planner Error:", e)
+    await update.message.reply_text("⚠️ Ошибка при генерации контент-плана.")
+
+session["state"] = "menu_roles"
 
         await update.message.reply_text("📅 Формирую контент-план...")
         try:
