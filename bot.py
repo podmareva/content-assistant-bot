@@ -386,8 +386,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["planner_data"].append(text)
         goal, platform, freq, face, days = session["planner_data"]
         context_text = get_user_context(session)
-		
-		wait update.message.reply_text("📅 План будет сформирован поэтапно (по 5 дней за раз)...")
+	wait update.message.reply_text("📅 План будет сформирован поэтапно (по 5 дней за раз)...")
 
         prompt = (
             f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный контент-план.\n\n"
