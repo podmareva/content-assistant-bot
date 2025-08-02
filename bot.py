@@ -345,8 +345,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text("✍️ Генерация текста...")
             try:
-                response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}])
+                response = openai.ChatCompletion.create(
+                   model="gpt-3.5-turbo",
+    max_tokens=4000,  # 🟢 увеличен лимит
+    temperature=0.7,
+    messages=[{"role": "user", "content": prompt + "\n\n⚠️ ВАЖНО: Не используй слова «и так далее». Выдай все {days} дней полностью, даже если ответ получится длинным. Разбей вывод на все дни по структуре."}]
+)
                 result = sanitize_ad_text(response["choices"][0]["message"]["content"])
                 await send_long_message(update.effective_chat.id, result, context)
             except Exception as e:
@@ -420,8 +424,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text("📅 Формирую контент-план...")
         try:
-            response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}])
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                max_tokens=4000,  # 🟢 увеличен лимит
+                temperature=0.7,
+                messages=[{"role": "user", "content": prompt + "\n\n⚠️ ВАЖНО: Не используй слова «и так далее». Выдай все {days} дней полностью, даже если ответ получится длинным. Разбей вывод на все дни по структуре."}]
+            )
             result = sanitize_ad_text(response["choices"][0]["message"]["content"])
             await send_long_message(update.effective_chat.id, result, context)
         except Exception as e:
