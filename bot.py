@@ -390,8 +390,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📅 План будет формироваться блоками по 5 дней, без повторов...")
 
         try:
-            # 🟢 Переменная для хранения предыдущих тем (будет передаваться в каждый следующий prompt)
-             used_ideas = ""
+            used_ideas = ""  # хранение предыдущих идей для исключения повторов
 
             for block_start in range(1, int(days) + 1, 5):
                 block_end = min(block_start + 4, int(days))
