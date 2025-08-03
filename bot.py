@@ -17,7 +17,7 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-BOT_NAME = "ContentAssistantBot"
+BOT_NAME = "content_helper_assist_bot"
 
 # === SQLite ===
 conn = sqlite3.connect("db.sqlite", check_same_thread=False)
