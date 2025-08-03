@@ -103,14 +103,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("👑 Привет, админ! Полный доступ.")
     if args:
         if validate_token(args[0], user_id):
-            await update.message.reply_text("✅ Доступ активирован!")
+            await update.message.reply_text("✅ Доступ активирован! Добро пожаловать!")
+            # 👉 сразу отправляем приветствие и кнопку
+            await update.message.reply_text(
+                WELCOME,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
+                )
+            )
         else:
             await update.message.reply_text("❌ Неверный или использованный токен.")
         return
-    if not is_allowed(user_id):
-        await update.message.reply_text("⛔️ Нет доступа. Купите доступ у администратора.")
-        return
-    await update.message.reply_text(WELCOME, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]))
 
 # === Callback кнопки ===
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -409,7 +412,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Для каждого дня указывай, для какого сегмента подходит контент (или для нескольких). "
                     "Обязательно используй данные сегментов, а не пиши общие советы.\n\n"
                     
-		    "=== УСЛОВИЯ ===\n"
+					"=== УСЛОВИЯ ==="
                     "- Генерируй только для Дней {block_start}–{block_end}."
                     "- НЕ повторяй темы, идеи, CTA и сегменты ЦА, которые уже были в предыдущих блоках."
                     "- Используй разные сегменты ЦА для каждого дня."
