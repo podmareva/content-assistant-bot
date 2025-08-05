@@ -350,9 +350,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 response = openai.ChatCompletion.create(
                    model="gpt-3.5-turbo",
-    max_tokens=4000,  # 🟢 увеличен лимит
-    temperature=0.7,
-    messages=[{"role": "user", "content": prompt + "\n\n⚠️ ВАЖНО: Не используй слова «и так далее». Выдай все {days} дней полностью, даже если ответ получится длинным. Разбей вывод на все дни по структуре."}]
+                   max_tokens=4000,  # 🟢 увеличен лимит
+                   temperature=0.7,
+                   messages=[{"role": "user", "content": prompt + "\n\n⚠️ ВАЖНО: Не используй слова «и так далее». Выдай все {days} дней полностью, даже если ответ получится длинным. Разбей вывод на все дни по структуре."}]
 )
                 result = sanitize_ad_text(response["choices"][0]["message"]["content"])
                 await send_long_message(update.effective_chat.id, result, context)
@@ -383,23 +383,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif session.get("state") == "planner_face":
         session["planner_data"].append(text)
         session["state"] = "planner_days"
-        await update.message.reply_text("5️⃣ На какой срок нужен план? (7 / 14 / 21 / 30 дней)")
+        await update.message.reply_text("5️⃣ На какой срок нужен план (7 / 14 / 21 / 30 дней)? Укажи числом")
 
     elif session.get("state") == "planner_days":
         session["planner_data"].append(text)
         goal, platform, freq, face, days = session["planner_data"]
         context_text = get_user_context(session)
 
-        await update.message.reply_text("📅 План будет формироваться блоками по 5 дней, без повторов...")
+        try:
+            total_days = int(days.strip())
+        except:
+            await update.message.reply_text("❌ Укажи количество дней числом (7, 14, 21, 30).")
+            return
+
+        await update.message.reply_text(f"📅 Формирую уникальный план на {total_days} дней (по 5 дней за раз)...")
+
+        # 🔹 Храним весь предыдущий контент, чтобы модель знала, что уже было
+        previous_context = ""
+        all_results = []
 
         try:
-            used_ideas = ""  # хранение предыдущих идей для исключения повторов
-
-            for block_start in range(1, int(days) + 1, 5):
-                block_end = min(block_start + 4, int(days))
+            for block_start in range(1, total_days + 1, 5):
+                block_end = min(block_start + 4, total_days)
 
                 prompt = (
-                    f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный контент-план.\n\n"
+                    f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный уникальный контент-план.\n\n"
                     f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
                     f"🎯 Цель: {goal}\n"
                     f"📌 Платформа: {platform}\n"
@@ -420,6 +428,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "- Контент должен развиваться."
   
                     "=== ТРЕБОВАНИЯ К ПЛАНУ ===\n"
+                    "- Выдай контент полностью для этих дней, без сокращений и "и так далее"\n"
+                    "- НЕ повторяй темы, форматы и идеи, которые уже использовались ранее\n"
+                    "- Каждый день должен быть уникальным и отличаться от предыдущих\n"
                     "– Каждый день должен включать: сторис + (или рилс / рилс + пост-карусель)\n"
                     "– Укажи для каждого дня: тему, формат, цель, CTA, идеи сторис, визуальные подсказки\n"
                     "– Раздели контент по рубрикатору: экспертность, вовлечение, личное, кейсы, продажи\n"
@@ -427,11 +438,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "– Добавляй пометку [Сегмент ЦА: ...] для каждого элемента контента\n\n"
 
                     "=== ФОРМАТ ВЫВОДА ===\n"
-                    "День 1:\n• Сторис – тема, идея, CTA [Сегмент ЦА: сегмент1]\n• Рилс/Пост – тема, формат, краткий сценарий, CTA [Сегмент ЦА: сегмент2]\n\n"
-                    "День 2:\n• … (и так далее для всех дней)\n\n"
+                    "День {block_start}:\n• Сторис – тема, идея, CTA [Сегмент ЦА: сегмент1]\n• Рилс/Пост – тема, формат, краткий сценарий, CTA [Сегмент ЦА: сегмент2]\n\n"
+                    "День {block_start+1}:\n• … (и так до {block_end})\n\n"
 
                     "=== СПЕЦИФИКА ===\n"
-                    "– План должен быть практичным, а не общими советами\n"
+                    "– План должен быть практичным и уникальным, а не общими советами\n"
                     "– Учитывай возможности автора (если публикаций мало – оптимизируй)\n"
                     "– Используй форматы 2024–2025: Reels, сторис, карусели, behind-the-scenes\n"
                     "– Добавляй конкретные идеи для визуала, интерактивов, опросов\n\n"
@@ -445,29 +456,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 					"⚠️ Используй креатив, добавляй новые механики, чтобы план был разнообразным."
                     "Ранее использованные идеи:{used_ideas}"
                 )
-
+                
+                await update.message.reply_text(f"⏳ Генерирую Дни {block_start}–{block_end}...")
+                
+                try:
                 response = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
+                    temperature=0.8,
                     max_tokens=3500,
-                    temperature=0.7,
                     messages=[{"role": "user", "content": prompt}]
                 )
-
                 result = sanitize_ad_text(response["choices"][0]["message"]["content"])
 
-                # 🟢 Сохраняем использованные идеи, чтобы GPT не повторял
-                used_ideas += f"\n\n{result}"
+                # Сохраняем в контекст, чтобы в следующем блоке исключить повторы
+                previous_context += f"\n{result}"
+                all_results.append(result)
 
-                # 🟢 Отправляем результат пользователю
+                # Отправляем пользователю сразу кусками
                 await send_long_message(update.effective_chat.id, result, context)
 
-        except Exception as e:
-            print("Planner Error:", e)
-            await update.message.reply_text("⚠️ Ошибка при генерации контент-плана.")
+            except Exception as e:
+                print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
+                await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}–{block_end}.")
 
-        session["state"] = "menu_roles"
-        kb = [[InlineKeyboardButton("Вернуться к помощникам", callback_data="roles_menu")]]
-        await update.message.reply_text("✅ План готов!", reply_markup=InlineKeyboardMarkup(kb))
+    except Exception as e:
+        print("Planner Fatal Error:", e)
+        await update.message.reply_text("❌ Ошибка при генерации плана. Попробуй ещё раз.")
+
+    # ✅ После генерации всех блоков – возвращаем пользователя к меню ролей
+    session["state"] = "menu_roles"
+    kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+    await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
 
 
     # === Reels ===
