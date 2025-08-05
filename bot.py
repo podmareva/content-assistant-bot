@@ -407,7 +407,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 block_end = min(block_start + 4, total_days)
 
                 prompt = (
-                    f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный уникальный контент-план.\n\n"
+                    f"Ты контент-планировщик. Твоя задача – создать развернутый, детализированный, уникальный контент-план.\n\n"
                     f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n{context_text}\n\n"
                     f"🎯 Цель: {goal}\n"
                     f"📌 Платформа: {platform}\n"
