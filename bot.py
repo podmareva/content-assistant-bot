@@ -475,7 +475,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Ранее использованные идеи: {used_ideas}
 """
                 
-                wait update.message.reply_text(f"⏳ Генерирую Дни {block_start}–{block_end}...")
+                await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
                 try:
                     response = openai.ChatCompletion.create(
