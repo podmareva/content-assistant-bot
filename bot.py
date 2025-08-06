@@ -476,10 +476,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Ранее использованные идеи: {used_ideas}
 """
-                
+
+await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")               
 try:
     # Внешний try – оборачивает весь процесс генерации плана
-    await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
     for block_start in range(1, int(days) + 1, 5):
         block_end = min(block_start + 4, int(days))
