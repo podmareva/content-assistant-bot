@@ -477,13 +477,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Ранее использованные идеи: {used_ideas}
 """
                 
-try:  # Внешний try – оборачивает весь процесс генерации плана
+try:
+    # Внешний try – оборачивает весь процесс генерации плана
     await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
     for block_start in range(1, int(days) + 1, 5):
         block_end = min(block_start + 4, int(days))
 
-        try:  # Внутренний try – только для OpenAI запроса
+        try:
+            # Внутренний try – только для OpenAI запроса
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 temperature=0.8,
@@ -500,11 +502,13 @@ try:  # Внешний try – оборачивает весь процесс г
             # ✅ отправляем пользователю сразу кусками
             await send_long_message(update.effective_chat.id, result, context)
 
-        except Exception as e:  # Ошибка только в одном блоке
+        except Exception as e:
+            # Ошибка только в одном блоке
             print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
             await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}–{block_end}.")
 
-except Exception as e:  # Общая ошибка всего процесса
+except Exception as e:
+    # Общая ошибка всего процесса
     print("Planner Fatal Error:", e)
     await update.message.reply_text("❌ Ошибка при генерации плана. Попробуй ещё раз.")
 
@@ -512,6 +516,7 @@ except Exception as e:  # Общая ошибка всего процесса
 session["state"] = "menu_roles"
 kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
 await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+
 
     # === Reels ===
     elif session.get("state") == "reels_topic":
