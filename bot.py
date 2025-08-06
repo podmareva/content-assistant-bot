@@ -475,33 +475,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Ранее использованные идеи: {used_ideas}
 """
                 
-            await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
+await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
-            try:
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    temperature=0.8,
-                    max_tokens=3500,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                result = sanitize_ad_text(response["choices"][0]["message"]["content"])
+try:
+    for block_start in range(1, int(days) + 1, 5):
+        block_end = min(block_start + 4, int(days))
 
-                # Сохраняем в контекст, чтобы в следующем блоке исключить повторы
-                previous_context += f"\n{result}"
-                all_results.append(result)
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                temperature=0.8,
+                max_tokens=3500,
+                messages=[{"role": "user", "content": prompt}]
+            )
 
-                # Отправляем пользователю сразу кусками
-                await send_long_message(update.effective_chat.id, result, context)
+            result = sanitize_ad_text(response["choices"][0]["message"]["content"])
+            previous_context += f"\n{result}"
+            all_results.append(result)
+            await send_long_message(update.effective_chat.id, result, context)
 
-           except Exception as e:
+        except Exception as e:  # <-- этот except ловит ошибки OpenAI
             print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
             await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}–{block_end}.")
 
-except Exception as e:
+except Exception as e:  # <-- этот except ловит все остальные ошибки
     print("Planner Fatal Error:", e)
     await update.message.reply_text("❌ Ошибка при генерации плана. Попробуй ещё раз.")
 
-# ✅ После успешного выполнения цикла возвращаем пользователя к меню ролей
+# ✅ Возвращаем меню
 session["state"] = "menu_roles"
 kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
 await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
