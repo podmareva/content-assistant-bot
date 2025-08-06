@@ -493,18 +493,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Отправляем пользователю сразу кусками
                 await send_long_message(update.effective_chat.id, result, context)
 
-            except Exception as e:
-                print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-                await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}–{block_end}.")
+           except Exception as e:
+            print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
+            await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}–{block_end}.")
 
-            except Exception as e:
-                print("Planner Fatal Error:", e)
-                await update.message.reply_text("❌ Ошибка при генерации плана. Попробуй ещё раз.")
+except Exception as e:
+    print("Planner Fatal Error:", e)
+    await update.message.reply_text("❌ Ошибка при генерации плана. Попробуй ещё раз.")
 
-            # ✅ После генерации всех блоков – возвращаем пользователя к меню ролей
-            session["state"] = "menu_roles"
-            kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
-            await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+# ✅ После успешного выполнения цикла возвращаем пользователя к меню ролей
+session["state"] = "menu_roles"
+kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
 
     # === Reels ===
     elif session.get("state") == "reels_topic":
