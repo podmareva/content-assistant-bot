@@ -477,11 +477,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
 await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
-try:
+try:  # Внешний try — оборачивает весь процесс
     for block_start in range(1, int(days) + 1, 5):
         block_end = min(block_start + 4, int(days))
 
-        try:
+        try:  # Внутренний try — только для OpenAI запроса
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 temperature=0.8,
@@ -492,15 +492,22 @@ try:
             result = sanitize_ad_text(response["choices"][0]["message"]["content"])
             previous_context += f"\n{result}"
             all_results.append(result)
+
+            # Отправляем пользователю сразу кусками
             await send_long_message(update.effective_chat.id, result, context)
 
-        except Exception as e:  # <-- этот except ловит ошибки OpenAI
+        except Exception as e:
             print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
             await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}–{block_end}.")
 
-except Exception as e:  # <-- этот except ловит все остальные ошибки
+except Exception as e:
     print("Planner Fatal Error:", e)
     await update.message.reply_text("❌ Ошибка при генерации плана. Попробуй ещё раз.")
+
+# ✅ Возврат в меню после успешной генерации
+session["state"] = "menu_roles"
+kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
 
 # ✅ Возвращаем меню
 session["state"] = "menu_roles"
