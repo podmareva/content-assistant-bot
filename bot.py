@@ -479,10 +479,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 try:
                     response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    temperature=0.8,
-                    max_tokens=3500,
-                    messages=[{"role": "user", "content": prompt}]
+                        model="gpt-3.5-turbo",
+                        temperature=0.8,
+                        max_tokens=3500,
+                        messages=[{"role": "user", "content": prompt}]
                 )
                 result = sanitize_ad_text(response["choices"][0]["message"]["content"])
 
