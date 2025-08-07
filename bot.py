@@ -253,6 +253,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session = sessions.setdefault(user_id, {"state": "", "step": 0, "data": {}, "products": []})
     text = update.message.text
 
+# === Обработка сообщений ===
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_allowed(user_id):
+        await update.message.reply_text("❌ У вас нет доступа.")
+        return
+
+    session = sessions.setdefault(user_id, {
+        "state": "", "step": 0, "data": {}, "products": [], "audience_segments": []
+    })
+    text = update.message.text
+
     # === Сбор основной информации ===
     if session.get("state") == "collecting_base_info":
         step = session["step"]
@@ -260,35 +272,52 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["step"] += 1
 
         if session["step"] == 3:
-            kb = [[InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
-                  [InlineKeyboardButton("Нет", callback_data="no_more_products")]]
-            await update.message.reply_text("🔥 Отлично! Хочешь добавить ещё продукт?", reply_markup=InlineKeyboardMarkup(kb))
+            kb = [
+                [InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
+                [InlineKeyboardButton("Нет", callback_data="no_more_products")]
+            ]
+            await update.message.reply_text(
+                "🔥 Отлично! Хочешь добавить ещё продукт?",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
             return
 
         if session["step"] < len(INFO_QUESTIONS):
             await update.message.reply_text(INFO_QUESTIONS[session["step"]])
         else:
-            kb = [[InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
-                  [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]]
-            await update.message.reply_text("Хочешь отправить дополнительную информацию по ЦА?", reply_markup=InlineKeyboardMarkup(kb))
+            kb = [
+                [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
+                [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]
+            ]
+            await update.message.reply_text(
+                "Хочешь отправить дополнительную информацию по ЦА?",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
             session["state"] = "awaiting_extra"
 
     elif session.get("state") == "collecting_more_products":
         session["products"].append(text)
-        kb = [[InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
-              [InlineKeyboardButton("Нет", callback_data="no_more_products")]]
+        kb = [
+            [InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
+            [InlineKeyboardButton("Нет", callback_data="no_more_products")]
+        ]
         await update.message.reply_text("✅ Продукт добавлен. Добавить ещё?", reply_markup=InlineKeyboardMarkup(kb))
 
     elif session.get("state") == "collecting_audience_multiple":
         session["data"].setdefault("audience_segments", []).append(text)
-        kb = [[InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
-              [InlineKeyboardButton("Закончить", callback_data="audience_done")]]
+        kb = [
+            [InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
+            [InlineKeyboardButton("Закончить", callback_data="audience_done")]
+        ]
         await update.message.reply_text("✅ Сегмент добавлен. Добавить ещё?", reply_markup=InlineKeyboardMarkup(kb))
 
     elif session.get("state") == "waiting_extra_info":
         session["data"]["extra_info"] = text
         kb = [[InlineKeyboardButton("Перейти к помощникам", callback_data="roles_menu")]]
-        await update.message.reply_text("✅ Доп.информация получена. Переходим к помощникам.", reply_markup=InlineKeyboardMarkup(kb))
+        await update.message.reply_text(
+            "✅ Доп.информация получена. Переходим к помощникам.",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
         session["state"] = "menu_roles"
 
     # === Копирайтер ===
