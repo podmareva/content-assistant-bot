@@ -377,49 +377,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Текст готов!", reply_markup=InlineKeyboardMarkup(kb))
 
 # === Планировщик ===
-if session.get("state") == "planner_goal":
-    session["planner_data"] = [text]
-    session["state"] = "planner_platform"
-    await update.message.reply_text("2️⃣ Укажи основную соцсеть.")
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    session = get_user_session(update)
 
-elif session.get("state") == "planner_platform":
-    session["planner_data"].append(text)
-    session["state"] = "planner_frequency"
-    await update.message.reply_text("3️⃣ Укажи частоту публикаций.")
+    if session.get("state") == "planner_goal":
+        session["planner_data"] = [text]
+        session["state"] = "planner_platform"
+        await update.message.reply_text("2️⃣ Укажи основную соцсеть.")
 
-elif session.get("state") == "planner_frequency":
-    session["planner_data"].append(text)
-    session["state"] = "planner_face"
-    await update.message.reply_text("4️⃣ От чьего лица вести (личный / бренд)?")
+    elif session.get("state") == "planner_platform":
+        session["planner_data"].append(text)
+        session["state"] = "planner_frequency"
+        await update.message.reply_text("3️⃣ Укажи частоту публикаций.")
 
-elif session.get("state") == "planner_face":
-    session["planner_data"].append(text)
-    session["state"] = "planner_days"
-    await update.message.reply_text("5️⃣ На какой срок нужен план (7 / 14 / 21 / 30 дней)? Укажи числом.")
+    elif session.get("state") == "planner_frequency":
+        session["planner_data"].append(text)
+        session["state"] = "planner_face"
+        await update.message.reply_text("4️⃣ От чьего лица вести (личный / бренд)?")
 
-elif session.get("state") == "planner_days":
-    session["planner_data"].append(text)
+    elif session.get("state") == "planner_face":
+        session["planner_data"].append(text)
+        session["state"] = "planner_days"
+        await update.message.reply_text("5️⃣ На какой срок нужен план (7 / 14 / 21 / 30 дней)? Укажи числом.")
 
-    # ✅ теперь тут гарантированно 5 элементов
-    goal, platform, freq, face, days = session["planner_data"]
-    context_text = get_user_context(session)
 
-    try:
-        total_days = int(days.strip())
-    except:
-        await update.message.reply_text("❌ Укажи количество дней числом (7, 14, 21, 30).")
-        return
+    elif session.get("state") == "planner_days":
+        session["planner_data"].append(text)
 
-    await update.message.reply_text(f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)...")
+        # ✅ теперь тут гарантированно 5 элементов
+        goal, platform, freq, face, days = session["planner_data"]
+        context_text = get_user_context(session)
 
-    previous_context = ""   # хранит ранее сгенерированные идеи
-    all_results = []        # список для всех блоков
+        try:
+            total_days = int(days.strip())
+        except:
+            await update.message.reply_text("❌ Укажи количество дней числом (7, 14, 21, 30).")
+            return
 
-    try:  # 🔹 ВНЕШНИЙ try — ловит общие ошибки всего процесса
-        for block_start in range(1, total_days + 1, 5):
-            block_end = min(block_start + 4, total_days)
+        await update.message.reply_text(f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)...")
 
-            prompt = f"""
+        previous_context = ""   # хранит ранее сгенерированные идеи
+        all_results = []        # список для всех блоков
+
+        try:  # 🔹 ВНЕШНИЙ try — ловит общие ошибки всего процесса
+            for block_start in range(1, total_days + 1, 5):
+                block_end = min(block_start + 4, total_days)
+
+                prompt = f"""
 Ты контент-планировщик. Твоя задача – создать развернутый, детализированный, уникальный контент-план.
 
 === ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===
@@ -477,34 +482,34 @@ elif session.get("state") == "planner_days":
 Ранее использованные идеи: {used_ideas}
 """
 
-            try:  # ВНУТРЕННИЙ try — только для OpenAI запроса
-                await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
+                try:  # ВНУТРЕННИЙ try — только для OpenAI запроса
+                    await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    temperature=0.8,
-                    max_tokens=3500,
-                    messages=[{"role": "user", "content": prompt}]
-                )
+                    response = openai.ChatCompletion.create(
+                        model="gpt-3.5-turbo",
+                        temperature=0.8,
+                        max_tokens=3500,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
 
-                result = sanitize_ad_text(response["choices"][0]["message"]["content"])
-                previous_context += f"\n{result}"
-                all_results.append(result)
+                    result = sanitize_ad_text(response["choices"][0]["message"]["content"])
+                    previous_context += f"\n{result}"
+                    all_results.append(result)
 
-                await send_long_message(update.effective_chat.id, result, context)
+                    await send_long_message(update.effective_chat.id, result, context)
 
-            except Exception as e:
-                print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-                await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}–{block_end}.")
+                except Exception as e:
+                    print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
+                    await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}–{block_end}.")
 
-    except Exception as e:
-        print("Planner Fatal Error:", e)
-        await update.message.reply_text("❌ Ошибка при генерации плана. Попробуй ещё раз.")
+        except Exception as e:
+            print("Planner Fatal Error:", e)
+            await update.message.reply_text("❌ Ошибка при генерации плана. Попробуй ещё раз.")
 
-    # ✅ После генерации всех блоков возвращаем пользователя к меню ролей
-    session["state"] = "menu_roles"
-    kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
-    await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+        # ✅ После генерации всех блоков возвращаем пользователя к меню ролей
+        session["state"] = "menu_roles"
+        kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+        await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
 
     # === Reels ===
     if session.get("state") == "reels_topic":
