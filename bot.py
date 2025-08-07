@@ -367,7 +367,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 )
                 result = sanitize_ad_text(response["choices"][0]["message"]["content"])
                 await send_long_message(update.effective_chat.id, result, context)
-           
+                
             except Exception as e:
                 print("Copywriter Error:", e)
                 await update.message.reply_text("⚠️ Ошибка генерации текста.")
@@ -377,7 +377,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Текст готов!", reply_markup=InlineKeyboardMarkup(kb))
 
 # === Планировщик ===
-elif session.get("state") == "planner_goal":
+if session.get("state") == "planner_goal":
     session["planner_data"] = [text]
     session["state"] = "planner_platform"
     await update.message.reply_text("2️⃣ Укажи основную соцсеть.")
