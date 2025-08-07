@@ -507,7 +507,7 @@ elif session.get("state") == "planner_days":
     await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
 
     # === Reels ===
-    elif session.get("state") == "reels_topic":
+    if session.get("state") == "reels_topic":
         session["reels_data"] = [text]
         session["state"] = "reels_format"
         await update.message.reply_text("2️⃣ Укажи формат: с лицом / без лица / монтаж.")
