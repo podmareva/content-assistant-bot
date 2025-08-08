@@ -265,53 +265,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     text = update.message.text
 
-elif session.get("state") == "collecting_base_info":
-    try:
-        # текущий шаг (0..3)
-        step = int(session.get("step", 0))
+    elif session.get("state") == "collecting_base_info":
+        try:
+            # текущий шаг (0..3)
+            step = int(session.get("step", 0))
 
-        # сохраняем ответ пользователя
-        session["data"].setdefault("info", [])
-        if len(session["data"]["info"]) <= step:
-            session["data"]["info"].append(text)
-        else:
-            # на всякий — обновим существующий индекс
-            session["data"]["info"][step] = text
+            # сохраняем ответ пользователя
+            session["data"].setdefault("info", [])
+            if len(session["data"]["info"]) <= step:
+                session["data"]["info"].append(text)
+            else:
+                # на всякий — обновим существующий индекс
+                session["data"]["info"][step] = text
 
-        # двигаем шаг
-        session["step"] = step + 1
-        print(f"[collecting_base_info] user={user_id} step={step} -> next={session['step']}")
+            # двигаем шаг
+            session["step"] = step + 1
+            print(f"[collecting_base_info] user={user_id} step={step} -> next={session['step']}")
 
-        # после 3-го ответа (индексы 0,1,2) спрашиваем про ещё продукт
-        if session["step"] == 3:
+            # после 3-го ответа (индексы 0,1,2) спрашиваем про ещё продукт
+            if session["step"] == 3:
+                kb = [
+                    [InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
+                    [InlineKeyboardButton("Нет", callback_data="no_more_products")]
+                ]
+                await update.message.reply_text(
+                    "🔥 Отлично! Хочешь добавить ещё продукт?",
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
+                return
+
+            # если не дошли до конца списка вопросов — задаём следующий
+            if session["step"] < len(INFO_QUESTIONS):
+                await update.message.reply_text(INFO_QUESTIONS[session["step"]])
+                return
+
+            # все базовые вопросы собраны (распаковка, позиционирование, продукт, анализ ЦА)
             kb = [
-                [InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
-                [InlineKeyboardButton("Нет", callback_data="no_more_products")]
+                [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
+                [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]
             ]
             await update.message.reply_text(
-                "🔥 Отлично! Хочешь добавить ещё продукт?",
+                "Хочешь отправить дополнительную информацию по ЦА?",
                 reply_markup=InlineKeyboardMarkup(kb)
             )
-            return
-
-        # если не дошли до конца списка вопросов — задаём следующий
-        if session["step"] < len(INFO_QUESTIONS):
-            await update.message.reply_text(INFO_QUESTIONS[session["step"]])
-            return
-
-        # все базовые вопросы собраны (распаковка, позиционирование, продукт, анализ ЦА)
-        kb = [
-            [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
-            [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]
-        ]
-        await update.message.reply_text(
-            "Хочешь отправить дополнительную информацию по ЦА?",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
-        session["state"] = "awaiting_extra"
-    except Exception as e:
-        print("[collecting_base_info] error:", e)
-        await update.message.reply_text("⚠️ Что‑то пошло не так при сборе информации. Напиши ещё раз, пожалуйста.")
+            session["state"] = "awaiting_extra"
+        except Exception as e:
+            print("[collecting_base_info] error:", e)
+            await update.message.reply_text("⚠️ Что‑то пошло не так при сборе информации. Напиши ещё раз, пожалуйста.")
 
     # === Копирайтер ===
     elif session.get("state", "").startswith("copywriter_"):
