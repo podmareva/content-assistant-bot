@@ -255,23 +255,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     text = update.message.text
 
-    # === Сбор основной информации ===
-    if session.get("state") == "collecting_base_info":
-        step = session["step"]
-        session["data"].setdefault("info", []).append(text)
-        session["step"] += 1
+        # === Сбор основной информации (фиксированный рабочий блок) ===
+    elif session.get("state") == "collecting_base_info":
+        # лог на всякий: смотри в логи, что реально пришло
+        print(f"[collecting_base_info] uid={user_id} step={session.get('step')} text={text[:80]!r}")
 
-        # После третьего ответа — спрашиваем про дополнительные продукты
-        if session["step"] == 3:
-            kb = [
-                [InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
-                [InlineKeyboardButton("Нет", callback_data="no_more_products")]
-            ]
-            await update.message.reply_text(
-                "🔥 Отлично! Хочешь добавить ещё продукт?",
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-            return
+        # 0: распаковка, 1: позиционирование, 2: первый продукт, 3: ветка «добавить ещё продукт?»
+        step = int(session.get("step", 0))
+
+        # сохраняем ответ в массив info
+        session.setdefault("data", {}).setdefault("info", []).append(text)
+
+        # увеличиваем шаг
+        step += 1
+        session["step"] = step
+
+    # если дошли до 3-го шага — предлагаем добавить ещё продукт и выходим
+    if step == 3:
+        kb = [
+            [InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
+            [InlineKeyboardButton("Нет", callback_data="no_more_products")]
+        ]
+        await update.message.reply_text(
+            "🔥 Отлично! Хочешь добавить ещё продукт?",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+        return
+
+    # иначе спрашиваем следующий пункт из INFO_QUESTIONS
+    try:
+        next_q = INFO_QUESTIONS[step]
+        await update.message.reply_text(next_q)
+    except Exception as e:
+        # на всякий — чтобы никогда не молчать
+        print("Next question error:", e)
+        await update.message.reply_text("Принял! Дай, пожалуйста, следующий пункт.")
 
         # Если вопросы ещё есть — задаём следующий
         if session["step"] < len(INFO_QUESTIONS):
