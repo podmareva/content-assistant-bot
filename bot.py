@@ -265,12 +265,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     text = update.message.text
 
-    # === Сбор основной информации ===
-    if session.get("state") == "collecting_base_info":
-        step = session["step"]
-        session["data"].setdefault("info", []).append(text)
-        session["step"] += 1
+elif session.get("state") == "collecting_base_info":
+    try:
+        # текущий шаг (0..3)
+        step = int(session.get("step", 0))
 
+        # сохраняем ответ пользователя
+        session["data"].setdefault("info", [])
+        if len(session["data"]["info"]) <= step:
+            session["data"]["info"].append(text)
+        else:
+            # на всякий — обновим существующий индекс
+            session["data"]["info"][step] = text
+
+        # двигаем шаг
+        session["step"] = step + 1
+        print(f"[collecting_base_info] user={user_id} step={step} -> next={session['step']}")
+
+        # после 3-го ответа (индексы 0,1,2) спрашиваем про ещё продукт
         if session["step"] == 3:
             kb = [
                 [InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
@@ -282,43 +294,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        # если не дошли до конца списка вопросов — задаём следующий
         if session["step"] < len(INFO_QUESTIONS):
             await update.message.reply_text(INFO_QUESTIONS[session["step"]])
-        else:
-            kb = [
-                [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
-                [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]
-            ]
-            await update.message.reply_text(
-                "Хочешь отправить дополнительную информацию по ЦА?",
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-            session["state"] = "awaiting_extra"
+            return
 
-    elif session.get("state") == "collecting_more_products":
-        session["products"].append(text)
+        # все базовые вопросы собраны (распаковка, позиционирование, продукт, анализ ЦА)
         kb = [
-            [InlineKeyboardButton("Добавить ещё", callback_data="add_product")],
-            [InlineKeyboardButton("Нет", callback_data="no_more_products")]
+            [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
+            [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")]
         ]
-        await update.message.reply_text("✅ Продукт добавлен. Добавить ещё?", reply_markup=InlineKeyboardMarkup(kb))
-
-    elif session.get("state") == "collecting_audience_multiple":
-        session["data"].setdefault("audience_segments", []).append(text)
-        kb = [
-            [InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
-            [InlineKeyboardButton("Закончить", callback_data="audience_done")]
-        ]
-        await update.message.reply_text("✅ Сегмент добавлен. Добавить ещё?", reply_markup=InlineKeyboardMarkup(kb))
-
-    elif session.get("state") == "waiting_extra_info":
-        session["data"]["extra_info"] = text
-        kb = [[InlineKeyboardButton("Перейти к помощникам", callback_data="roles_menu")]]
         await update.message.reply_text(
-            "✅ Доп.информация получена. Переходим к помощникам.",
+            "Хочешь отправить дополнительную информацию по ЦА?",
             reply_markup=InlineKeyboardMarkup(kb)
         )
-        session["state"] = "menu_roles"
+        session["state"] = "awaiting_extra"
+    except Exception as e:
+        print("[collecting_base_info] error:", e)
+        await update.message.reply_text("⚠️ Что‑то пошло не так при сборе информации. Напиши ещё раз, пожалуйста.")
 
     # === Копирайтер ===
     elif session.get("state", "").startswith("copywriter_"):
