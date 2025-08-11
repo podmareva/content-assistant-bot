@@ -295,13 +295,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
    
     elif query.data == "audience_done":
-        session["data"]["extra_info"] = "\n\n".join(session.get("audience_segments", []))
+        # Сохраняем собранные сегменты одной строкой (как раньше extra_info)
+        session.setdefault("data", {})["extra_info"] = "\n\n".join(session.get("audience_segments", []))
+
+        # СРАЗУ показываем выбор помощников
+        session["state"] = "menu_roles"
         kb = [
-            [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
-            [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")],
+            [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
+            [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
+            [InlineKeyboardButton("🎬 Reels",       callback_data="role_reels")],
         ]
         await query.edit_message_text(
-            "✅ Анализ ЦА собран. Добавить дополнительную информацию?",
+            "✅ Анализ ЦА собран! Выбери помощника:",
             reply_markup=InlineKeyboardMarkup(kb),
         )
 
@@ -434,15 +439,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         elif step == 3:
-            session["data"]["info"].append(text)  # анализ ЦА
-            # Здесь можешь расширить на многосегментный сбор, если нужно
+            # Первый сегмент ЦА -> запускаем цикл сегментов
+            session.setdefault("audience_segments", []).append(text)
+            session["state"] = "collecting_audience_multiple"
             kb = [
-                [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
-                [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
-                [InlineKeyboardButton("🎬 Reels", callback_data="role_reels")],
+                [InlineKeyboardButton("Да",  callback_data="add_audience_segment")],
+                [InlineKeyboardButton("Нет", callback_data="audience_done")],
             ]
-            session["state"] = "menu_roles"
-            await update.message.reply_text("Выбери помощника:", reply_markup=InlineKeyboardMarkup(kb))
+            await update.message.reply_text(
+                "✅ Сегмент #1 добавлен. Хочешь прислать ещё сегмент ЦА? (Да/Нет)",
+                reply_markup=InlineKeyboardMarkup(kb),
+            )
             return
 
     # Добавление доп. продуктов (альтернативный поток через кнопки add_product/no_more_products)
@@ -462,14 +469,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if session.get("state") == "collecting_audience_multiple":
         session.setdefault("audience_segments", []).append(text)
         kb = [
-            [InlineKeyboardButton("Добавить ещё сегмент", callback_data="add_audience_segment")],
-            [InlineKeyboardButton("Закончить", callback_data="audience_done")],
+            [InlineKeyboardButton("Да",  callback_data="add_audience_segment")],
+            [InlineKeyboardButton("Нет", callback_data="audience_done")],
         ]
         await update.message.reply_text(
-            "✅ Сегмент добавлен. Добавить ещё?",
+            "✅ Сегмент добавлен. Хочешь прислать ещё сегмент ЦА? (Да/Нет)",
             reply_markup=InlineKeyboardMarkup(kb),
-        )
-        return
+)
 
     # Доп.инфа
     if session.get("state") == "waiting_extra_info":
