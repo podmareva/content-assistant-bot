@@ -1,14 +1,17 @@
 import os
 import secrets
 from dotenv import load_dotenv
-
-import psycopg
+import os, psycopg
 from psycopg.rows import dict_row
 
+load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
+conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
+cur = conn.cursor()
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+app = Application.builder().token(BOT_TOKEN).build()
 )
 import openai
 
