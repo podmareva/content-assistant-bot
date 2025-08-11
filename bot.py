@@ -295,9 +295,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["state"] = "collecting_audience_multiple"
         await query.edit_message_text("✍️ Пришли следующий сегмент анализа ЦА.")
 
+   
     elif query.data == "audience_done":
-    session["data"]["extra_info"] = "\n\n".join(session.get("audience_segments", []))
-
+        session["data"]["extra_info"] = "\n\n".join(session.get("audience_segments", []))
         kb = [
             [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
             [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")],
@@ -306,6 +306,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Анализ ЦА собран. Добавить дополнительную информацию?",
             reply_markup=InlineKeyboardMarkup(kb),
         )
+
 
     elif query.data == "add_extra_info":
         session["state"] = "waiting_extra_info"
