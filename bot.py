@@ -1,13 +1,9 @@
 import os
 import secrets
 from dotenv import load_dotenv
-import os, psycopg
-from psycopg.rows import dict_row
 
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
-conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
-cur = conn.cursor()
+import psycopg
+from psycopg.rows import dict_row
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -15,23 +11,22 @@ import openai
 
 print(">>> Бот загружен, bot.py — FIX (psycopg v3 + PTB21)")
 
-# === Настройки ===
+# === Настройки окружения ===
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 BOT_NAME = os.getenv("MAIN_BOT_USERNAME", "content_helper_assist_bot")
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-# === Создание приложения PTB 21 ===
-app = Application.builder().token(BOT_TOKEN).build()
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL не задан. Укажи его в .env или переменных окружения.")
 
 # === Подключение к PostgreSQL (psycopg v3) ===
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL не задан в переменных окружения.")
-
 conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
 cur = conn.cursor()
+
+# === Приложение PTB 21 ===
+app = Application.builder().token(BOT_TOKEN).build()
 
 # === Схема БД (PostgreSQL) ===
 cur.execute(
@@ -818,8 +813,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === Запуск бота ===
 if __name__ == "__main__":
-    app = Application.Builder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("gentoken", gentoken))
     app.add_handler(CallbackQueryHandler(button_handler))
@@ -827,4 +820,3 @@ if __name__ == "__main__":
 
     print("🚀 Бот запущен! Ждём пользователей...")
     app.run_polling()
-
