@@ -142,8 +142,7 @@ async def gentoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     # Если внезапно конфликт, можно перегенерить; для простоты считаем, что ок
     await update.message.reply_text(
-        f"✅ Токен для {target_id}: {token}
-https://t.me/{BOT_NAME}?start={token}"
+        f"✅ Токен для {target_id}: {token}\nhttps://t.me/{BOT_NAME}?start={token}"
     )
 
 
