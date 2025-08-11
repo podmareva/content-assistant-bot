@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 import openai
 
-print(">>> Бот загружен, bot.py (PostgreSQL/Supabase) — FIX")
+print(">>> Бот загружен, bot.py — FIX (psycopg v3 + PTB20)")
 
 # === Настройки ===
 load_dotenv()
@@ -24,9 +24,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # === Подключение к PostgreSQL (psycopg v3) ===
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL не задан. Укажи его в переменных окружения.")
+    raise RuntimeError("DATABASE_URL не задан в переменных окружения.")
 
-# row_factory=dict_row даст словари вместо кортежей
 conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
 cur = conn.cursor()
 

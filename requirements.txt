@@ -1,7 +1,8 @@
 python-telegram-bot==20.7
 openai==0.28.1
-python-dotenv==1.0.1
-psycopg[binary]>=3.1.19,<3.3
-
-
-
+python-dotenv>=1.0
+psycopg[binary]==3.1.19
+requests
+tqdm
+aiohttp
+typing-extensions
