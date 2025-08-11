@@ -1,3 +1,4 @@
-openai==0.28
-python-telegram-bot==20.3
-python-dotenv
+python-telegram-bot==20.7
+openai==0.28.1
+python-dotenv==1.0.1
+psycopg2-binary==2.9.9
