@@ -1,7 +1,9 @@
 import os
 import secrets
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -18,7 +20,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 BOT_NAME = os.getenv("MAIN_BOT_USERNAME", "content_helper_assist_bot")
-DATABASE_URL = os.getenv("DATABASE_URL")  # postgres://... / postgresql://...
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # === Подключение к PostgreSQL ===
 if not DATABASE_URL:
@@ -91,8 +93,7 @@ def get_user_context(session: dict) -> str:
         extra = data.get("extra_info")
         if extra:
             lines.append(f"Доп.по ЦА: {extra}")
-        return "
-".join(lines)
+        return "\n".join(lines)
     return "Нет данных"
 
 
@@ -164,23 +165,19 @@ def validate_token(token: str, user_id: int) -> bool:
 
 
 # === Текст приветствия ===
-WELCOME = (
-    "👋 Привет! Ты в боте «Контент-ассистент».
+WELCOME = """👋 Привет! Ты в боте «Контент-ассистент».
 
-"
-    "Он поможет:
+Он поможет:
 • составить контент-план,
 • написать пост или Reels,
 • упаковать продукт.
 
-"
-    "🔐 Чтобы начать, подтверди согласие с "
-    "[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit) "
-    "и [Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit).
+🔐 Чтобы начать, подтверди согласие с
+[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit)
+и [Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit).
 
-"
-    "✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!"
-)
+✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!
+"""
 
 # Порядок вопросов по базе
 INFO_QUESTIONS = [
@@ -300,9 +297,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✍️ Пришли следующий сегмент анализа ЦА.")
 
     elif query.data == "audience_done":
-        session["data"]["extra_info"] = "
+    session["data"]["extra_info"] = "\n\n".join(session.get("audience_segments", []))
 
-".join(session.get("audience_segments", []))
         kb = [
             [InlineKeyboardButton("ДА ✅", callback_data="add_extra_info")],
             [InlineKeyboardButton("НЕТ ❌", callback_data="no_extra_info")],
