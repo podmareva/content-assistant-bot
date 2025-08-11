@@ -1,12 +1,10 @@
 import os
 import secrets
+from dotenv import load_dotenv
 
 import psycopg
 from psycopg.rows import dict_row
-conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
-cur = conn.cursor()r
 
-from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
@@ -24,12 +22,12 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 BOT_NAME = os.getenv("MAIN_BOT_USERNAME", "content_helper_assist_bot")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# === Подключение к PostgreSQL ===
+# === Подключение к PostgreSQL (psycopg v3) ===
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL не задан. Укажи его в переменных окружения.")
 
-conn = psycopg2.connect(DATABASE_URL, sslmode="require", cursor_factory=RealDictCursor)
-conn.autocommit = True
+# row_factory=dict_row даст словари вместо кортежей
+conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
 cur = conn.cursor()
 
 # === Схема БД (PostgreSQL) ===
