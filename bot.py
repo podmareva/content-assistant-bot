@@ -11,11 +11,9 @@ cur = conn.cursor()
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-app = Application.builder().token(BOT_TOKEN).build()
-)
 import openai
 
-print(">>> Бот загружен, bot.py — FIX (psycopg v3 + PTB20)")
+print(">>> Бот загружен, bot.py — FIX (psycopg v3 + PTB21)")
 
 # === Настройки ===
 load_dotenv()
@@ -24,6 +22,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 BOT_NAME = os.getenv("MAIN_BOT_USERNAME", "content_helper_assist_bot")
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# === Создание приложения PTB 21 ===
+app = Application.builder().token(BOT_TOKEN).build()
 
 # === Подключение к PostgreSQL (psycopg v3) ===
 if not DATABASE_URL:
