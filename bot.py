@@ -742,6 +742,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)..."
         )
+        
+        # --- ДАННЫЕ для промпта: сегменты ЦА и уже использованные идеи ---
+        segments = session.get("audience_segments", [])
+        segments_str = " | ".join(segments) if segments else "—"
+
+        # возьмём сохранённые идеи из БД, чтобы избегать повторов
+        try:
+            prev_ideas = load_used_ideas(user_id, limit=400)
+        except Exception:
+            prev_ideas = []
+        used_ideas = "; ".join(prev_ideas) if prev_ideas else "—"
 
         previous_context = ""
         all_results = []
@@ -842,14 +853,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
                     )
 
-        import traceback
-
         except Exception as e:
             print("Planner Fatal Error:", e)
-            traceback.print_exc()
             await update.message.reply_text(
-                f"❌ Ошибка при генерации плана: {e}"
-    )
+                "❌ Ошибка при генерации плана. Попробуй ещё раз."
+            )
 
         session["state"] = "menu_roles"
         kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
