@@ -186,6 +186,20 @@ async def send_long_message(chat_id: int, text: str, context: ContextTypes.DEFAU
     for chunk in parts:
         await context.bot.send_message(chat_id=chat_id, text=chunk)
 
+def normalize_platform(text: str) -> str | None:
+    t = (text or "").strip().lower()
+    if any(x in t for x in ["insta", "инста", "инстаграм", "инстаграмм", "ig"]):
+        return "instagram"
+    if any(x in t for x in ["tg", "тг", "telegram", "телеграм"]):
+        return "telegram"
+    if any(x in t for x in ["youtube", "ютуб"]):
+        return "youtube"
+    if any(x in t for x in ["vk", "вк", "вконтакте"]):
+        return "vk"
+    if any(x in t for x in ["tiktok", "тик ток", "тикток"]):
+        return "tiktok"
+    return None
+
 # === Анти-повторы идей (извлечь / сохранить / загрузить) ===
 import re  # если уже импортирован выше — повторять не надо
 
@@ -719,6 +733,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     # === Планировщик ===
+    # цель → платформа
+    if session.get("state") == "planner_goal":
+        goal = (text or "").strip()
+        if not goal:
+            await update.message.reply_text("🎯 Укажи цель (привлечение, прогрев, продажи и т.д.).")
+            return
+        session["planner_data"] = [goal]          # [goal]
+        session["state"] = "planner_platform"
+        await update.message.reply_text(
+            "📌 На какой платформе нужен план? (Instagram / Telegram / YouTube / VK / TikTok)\n"
+            "Можно писать «инстаграмм», «инста», «тг», «ютуб»."
+        )
+        return
+
+    # платформа → частота
+    if session.get("state") == "planner_platform":
+        platform = normalize_platform(text)
+        if not platform:
+            await update.message.reply_text(
+                "📌 Платформа не распознана. Напиши Instagram / Telegram / YouTube / VK / TikTok\n"
+                "(можно «инста», «инстаграмм», «тг», «ютуб»)."
+            )
+            return
+        session["planner_data"].append(platform)  # [goal, platform]
+        session["state"] = "planner_frequency"
+        await update.message.reply_text("🗓 Укажи частоту публикаций (например: 1/день, 3/неделю).")
+        return
+
+    # частота → лицо
+    if session.get("state") == "planner_frequency":
+        session["planner_data"].append(text.strip())  # [goal, platform, freq]
+        session["state"] = "planner_face"
+        await update.message.reply_text("👤 От чьего лица вести: личный / бренд / эксперт / команда?")
+        return
+
+    # лицо → спрашиваем срок
+    if session.get("state") == "planner_face":
+        session["planner_data"].append(text.strip())  # [goal, platform, freq, face]
+        session["state"] = "planner_days"
+        await update.message.reply_text("📅 На какой срок нужен план (7 / 14 / 21 / 30 дней)? Напиши числом.")
+        return
+
     if session.get("state") == "planner_days":
         session["planner_data"].append(text)
 
@@ -764,7 +820,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 (один или несколько). Запрещены общие советы — используй именно сегменты из ввода.
 
 === ОГРАНИЧЕНИЯ И ЛОГИКА ===
-- Генерируй только для дней {bs}–{be} включительно и перечисляй дни по порядку.
+- Генерируй только для дней {block_start}–{block_end} включительно и перечисляй дни по порядку.
 - Не повторяй темы, форматы, механики, заголовки и CTA, которые встречались ранее (список использованного): {used_ideas_pool[-2000:]}.
   Считай повтором не только точные совпадения, но и смысловые дубликаты.
 - Внутри текущего блока тоже не повторяйся.
@@ -778,20 +834,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - Рекомендации по визуалу — практичные (ракурсы, кадры, сцены, текст-оверлеи), без расплывчатых «красивых фото».
 
 === ФОРМАТ ВЫВОДА (строго как здесь) ===
-День {bs}:
+День {block_start}:
 • Рубрика: <Экспертность/Вовлечение/Личное/Кейсы/Продажи> • Этап: <Холодная/Тёплая/Горячая>
 • Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Рилс/Пост — Заголовок: <...> • Формат: <Рилс|Карусель> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Визуал: <3–5 подсказок для визуала>
 
-День {bs+1}:
+День {block_start+1}:
 • Рубрика: <...> • Этап: <...>
 • Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Рилс/Пост — Заголовок: <...> • Формат: <...> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Визуал: <...>
 
 ...
-День {be}:
+День {block_end}:
 • Рубрика: <...> • Этап: <...>
 • Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Рилс/Пост — Заголовок: <...> • Формат: <...> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
