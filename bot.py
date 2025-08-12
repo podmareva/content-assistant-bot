@@ -836,7 +836,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # >>> добавляем эти две строки <<<
                 new_ideas = extract_ideas_from_plan(result)
                 save_used_ideas(update.effective_user.id, new_ideas)
-                    )
                     
                     previous_context += f"\n{result}"
                     all_results.append(result)
