@@ -40,6 +40,25 @@ async def send_long_text(chat_id: int, text: str, context, parse_mode=None):
     for chunk in parts:
         await context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode)
 
+import time
+
+def openai_chat(messages, *, max_tokens=1600, temperature=0.8, attempts=3):
+    last_err = None
+    for i in range(1, attempts + 1):
+        try:
+            r = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                messages=messages,
+            )
+            return r["choices"][0]["message"]["content"]
+        except Exception as e:
+            last_err = e
+            print(f"[openai_chat] attempt {i}/{attempts} failed:", e)
+            time.sleep(1.5 * i)
+    raise last_err
+
 print(">>> Бот загружен, bot.py — FIX (psycopg v3 + PTB21)")
 
 # === Настройки окружения ===
@@ -619,6 +638,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # FIX: безопасные плейсхолдеры вместо необъявленных переменных
             used_ideas = ""
             days = ""
+            history = "\n".join(load_used_ideas(user_id)) if 'load_used_ideas' in globals() else ""
 
             prompt = f"""
 Ты профессиональный копирайтер и упаковщик. Создай {session['task']} для блогера/эксперта/бренда.
@@ -669,8 +689,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - Не повторяй идеи, CTA, структуру и примеры, использованные ранее.  
 - Для каждого текста добавляй новые креативные механики и неожиданные ходы.  
 - Используй разные подходы: истории, факты, неожиданные советы, чтобы каждый материал был свежим.  
-- Не используй ранее применённые идеи: {used_ideas_pool[-2000:]}  
-
+- Не используй ранее применённые идеи: {history[-2000:]}
+ 
 ⚖️ Соблюдай Федеральный закон №38-ФЗ и №72-ФЗ от 07.04.2025:  
 не используй фразы «100% результат», «лучший», «гарантировано»,  
 заменяй их корректными альтернативами: «один из популярных вариантов», «подходит для…», «узнай подробнее».  
@@ -734,23 +754,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             total_days = int(days.strip())
         except Exception:
-            await update.message.reply_text(
-                "❌ Укажи количество дней числом (7, 14, 21, 30)."
-            )
+            await update.message.reply_text("❌ Укажи количество дней числом (7, 14, 21, 30).")
             return
 
-        await update.message.reply_text(
-            f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)..."
-        )
+        # Подтверждение
+        await update.message.reply_text(f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)...")
 
         previous_context = ""
         all_results = []
 
-        try:
-            for block_start in range(1, total_days + 1, 5):
-                block_end = min(block_start + 4, total_days)
+        # 2.1 Определи сегменты и историю идей
+        segments = session.get("audience_segments", [])
+        segments_str = " | ".join(segments) if segments else "—"
 
-                prompt = f"""
+        # история ранее использованных идей из БД (у тебя есть load_used_ideas)
+        try:
+            history_list = load_used_ideas(user_id)
+        except Exception as e:
+            print("[used_ideas] load error:", e)
+            history_list = []
+        used_ideas_pool = "\n".join(history_list)  # строка
+
+        # 2.2 Основной цикл генерации
+        BLOCK_SIZE = 5  # по умолчанию 5; при ошибке попробуем 3
+
+        for block_start in range(1, total_days + 1, BLOCK_SIZE):
+            block_end = min(block_start + (BLOCK_SIZE - 1), total_days)
+
+            def make_prompt(bs, be):
+                return = f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
 жёстко опираясь на ввод пользователя.
 
@@ -812,53 +844,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
 
-                await update.message.reply_text(
-                    f"⏳ Генерирую Дни {block_start}-{block_end}..."
-                )
+                await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
+                # 2.3 Попытка №1 — блок размером 5
+                try_prompt = make_prompt(block_start, block_end)
                 try:
-                    response = openai.ChatCompletion.create(
-                        model="gpt-3.5-turbo",
-                        temperature=0.8,
-                        max_tokens=1500,
-                        messages=[{"role": "user", "content": prompt}],
-                    )
+                    raw = openai_chat(messages=[{"role": "user", "content": try_prompt}],
+                                       temperature=0.8, max_tokens=1800, attempts=2)
+                    result = sanitize_ad_text(raw)
+                except Exception as e1:
+                    # 2.4 Попытка №2 — уменьшаем блок до 3 дней
+                    print(f"[planner] fail {block_start}-{block_end} (5 дней):", e1)
+                    small_end = min(block_start + 2, total_days)
+                    await update.message.reply_text(f"⚠️ Ошибка. Пробую сгенерировать по 3 дня ({block_start}-{small_end}).")
+                    try_prompt_small = make_prompt(block_start, small_end)
+                    try:
+                        raw = openai_chat(messages=[{"role": "user", "content": try_prompt_small}],
+                                           temperature=0.8, max_tokens=1600, attempts=3)
+                        result = sanitize_ad_text(raw)
+                        block_end = small_end  # фактически сгенерировали 3 дня
+                    except Exception as e2:
+                        print(f"[planner] fail {block_start}-{small_end} (3 дня):", e2)
+                        await update.message.reply_text(
+                            f"❌ Не удалось сгенерировать блок дней {block_start}-{block_end}. Перехожу дальше."
+                        )
+                        continue  # к следующему блоку
 
-                    result = sanitize_ad_text(
-                        response["choices"][0]["message"]["content"]
-                    )
-
-                    # Если у тебя НЕТ функций extract_ideas_from_plan/save_used_ideas — оставь строки ниже закомментированными.
-                    # new_ideas = extract_ideas_from_plan(result)
-                    # save_used_ideas(update.effective_user.id, new_ideas)
-
+                # 2.5 Отправка и сохранение идей
+                try:
                     new_ideas = extract_ideas_from_plan(result)
                     if new_ideas:
-                        save_used_ideas_pg(user_id, new_ideas)
+                        save_used_ideas(user_id, new_ideas)
                         used_ideas_pool = (used_ideas_pool + "\n" + "\n".join(new_ideas))[-4000:]
-
-                    previous_context += f"\n{result}"
-                    all_results.append(result)
-                    await send_long_message(update.effective_chat.id, result, context)
-
                 except Exception as e:
-                    print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-                    await update.message.reply_text(
-                        f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
-                    )
+                    print("[planner] ideas save error:", e)
 
-        except Exception as e:
-            print("Planner Fatal Error:", e)
-            await update.message.reply_text(
-                "❌ Ошибка при генерации плана. Попробуй ещё раз."
-            )
+                previous_context += f"\n{result}"
+                all_results.append(result)
+                await send_long_message(update.effective_chat.id, result, context)
 
-        session["state"] = "menu_roles"
-        kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
-        await update.message.reply_text(
-            "✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb)
-        )
-        return
+            # финал
+            session["state"] = "menu_roles"
+            kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+            await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+            return
 
     # === Reels ===
     if session.get("state") == "reels_topic":
@@ -884,6 +913,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic, format_r, style, music = session["reels_data"]
         context_text = get_user_context(session)
         used_ideas = ""
+        history = "\n".join(load_used_ideas(user_id)) if 'load_used_ideas' in globals() else ""
 
         prompt = f"""
 Ты профессиональный продюсер коротких видео (Reels, TikTok, Shorts, ВК-клипы). Создай уникальный сценарий для видео по данным пользователя.
@@ -907,7 +937,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - Каждый новый сценарий должен быть уникальным, отличаться от ранее сгенерированных.  
 - Не повторяй идеи, хук, форматы и визуальные решения, которые уже использовались.  
 - Используй разные творческие подходы: необычные углы съёмки, свежие тренды, неожиданные сюжеты.  
-- Не используй ранее применённые идеи: {used_ideas_pool[-2000:]}  
+- Не используй ранее применённые идеи: {history[-2000:]}  
 
 === ТРЕБОВАНИЯ ===
 – Используй сторителлинг, эмоции, провокационные или цепляющие элементы.  
@@ -920,7 +950,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 заменяй их корректными альтернативами («один из популярных вариантов», «подходит для…», «узнай подробнее»).
 
 💡 Выдай сценарий в структурированном виде, готовый к съёмке, с уникальными элементами, которых не было ранее.
-Не повторяй ранее использованные идеи: {used_ideas_pool[-2000:]}
+Не повторяй ранее использованные идеи: {history[-2000:]}
 """
         await update.message.reply_text("🎬 Генерация сценария...")
         try:
