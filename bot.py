@@ -23,6 +23,30 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL не задан. Укажи его в .env или переменных окружения.")
 
+import time  # если не импортирован выше
+
+def openai_chat(messages, *, max_tokens=1800, temperature=0.7, attempts=3):
+    """Безопасный вызов ChatCompletion с ретраями и проверкой пустых ответов."""
+    last_err = None
+    for i in range(1, attempts + 1):
+        try:
+            resp = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                messages=messages,
+            )
+            content = resp["choices"][0]["message"]["content"]
+            if not content or not content.strip():
+                raise ValueError("Пустой ответ модели")
+            return content.strip()
+        except Exception as e:
+            last_err = e
+            print(f"[openai_chat] попытка {i}/{attempts} не удалась:", e)
+            time.sleep(1.5 * i)
+    # если все попытки неудачны — пробрасываем
+    raise last_err
+
 # === Подключение к PostgreSQL (psycopg v3) ===
 conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
 cur = conn.cursor()
@@ -687,22 +711,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 session["unpacking"] = restored.get("unpacking")
                 session["positioning"] = restored.get("positioning")
 
-        await update.message.reply_text(
-            f"📅 Формирую уникальный контент-план на {total_days} дней (по 3 дня за раз)..."
-        )
+		await update.message.reply_text(
+			f"📅 Формирую уникальный контент-план на {total_days} дней (по 3 дня за раз)..."
+		)
 
-        previous_context = ""
-        all_results = []
+		previous_context = ""
+		all_results = []
 
-        # Справочная строка по сегментам (если есть)
-        segments = session.get("audience_segments", [])
-        segments_str = " | ".join(segments) if segments else "—"
-        used_ideas = ""
+		# справочная строка по сегментам (если есть)
+		segments = session.get("audience_segments", [])
+		segments_str = " | ".join(segments) if segments else "—"
 
-        try:
-            BLOCK_SIZE = 3  # меньше блока -> стабильнее влезает в токены
-            for block_start in range(1, total_days + 1, BLOCK_SIZE):
-                block_end = min(block_start + (BLOCK_SIZE - 1), total_days)
+		# шаг генерации
+		BLOCK_SIZE = 3
+
+		for block_start in range(1, total_days + 1, BLOCK_SIZE):
+			block_end = min(block_start + (BLOCK_SIZE - 1), total_days)
 
                 prompt = f"""
 Ты контент-планировщик. Твоя задача – создать развернутый, детализированный, уникальный контент-план.
@@ -766,72 +790,65 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
 
-                await update.message.reply_text(
-                    f"⏳ Генерирую Дни {block_start}-{block_end}..."
-                )
+                await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
-                try:
-                    response = openai.ChatCompletion.create(
-                        model="gpt-3.5-turbo",
-                        temperature=0.8,
-                        max_tokens=2000,
-                        messages=[{"role": "user", "content": prompt}],
-                    )
+				try:
+					# основной вызов
+					raw = openai_chat(
+						messages=[{"role": "user", "content": prompt}],
+						temperature=0.8,
+						max_tokens=2000,
+						attempts=3,
+					)
+					result = sanitize_ad_text(raw)
 
-                    result = sanitize_ad_text(
-                        response["choices"][0]["message"]["content"]
-                    )
+					# проверяем, что модель выдала все дни блока
+					covered = extract_day_numbers(result)
+					expected = set(range(block_start, block_end + 1))
+					missing = sorted(expected - covered)
 
-                    # Проверяем, что модель выдала все дни блока
-                    covered = extract_day_numbers(result)
-                    expected = set(range(block_start, block_end + 1))
-                    missing = sorted(expected - covered)
+					# догенерация недостающих дней, если нужно
+					if missing:
+						await update.message.reply_text(
+							f"⚠️ В блоке {block_start}-{block_end} не хватило дней: {', '.join(map(str, missing))}. Догенерирую…"
+						)
+						strict_prompt = f"""
+			Сгенерируй СТРОГО для дней: {format_missing_days(missing)}.
+			Требования:
+			- Заголовок каждого дня ТОЛЬКО в формате "День N:".
+			- Не повторяй уже выданные дни.
+			- Формат и требования те же, что в предыдущем запросе.
+			""".strip()
 
-                    if missing:
-                        await update.message.reply_text(
-                            f"⚠️ В блоке {block_start}-{block_end} не хватило дней: {', '.join(map(str, missing))}. Догенерирую..."
-                        )
-                        strict_prompt = f"""
-Сгенерируй СТРОГО для дней: {format_missing_days(missing)}.
-Требования:
-- На каждый день обязателен заголовок вида "День N:" (ровно так).
-- Не повторяй уже выданные дни.
-- Формат и требования те же, что в предыдущем запросе.
-"""
-                        retry = openai.ChatCompletion.create(
-                            model="gpt-3.5-turbo",
-                            temperature=0.7,
-                            max_tokens=900,
-                            messages=[
-                                {"role": "user", "content": prompt},
-                                {"role": "user", "content": strict_prompt},
-                            ],
-                        )
-                        retry_text = sanitize_ad_text(retry["choices"][0]["message"]["content"])
-                        result += "\n\n" + retry_text
+						retry_raw = openai_chat(
+							messages=[
+								{"role": "user", "content": prompt},
+								{"role": "user", "content": strict_prompt},
+							],
+							temperature=0.7,
+							max_tokens=900,
+							attempts=2,
+						)
+						retry_text = sanitize_ad_text(retry_raw)
+						result += "\n\n" + retry_text
 
-                    previous_context += f"\n{result}"
-                    all_results.append(result)
-                    await send_long_message(update.effective_chat.id, result, context)
+					previous_context += f"\n{result}"
+					all_results.append(result)
+					await send_long_message(update.effective_chat.id, result, context)
 
-                except Exception as e:
-                    print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-                    await update.message.reply_text(
-                        f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
-                    )
+				except Exception as e:
+					# лог и продолжение к следующему блоку
+					print(f"[planner] Ошибка генерации для дней {block_start}-{block_end}: {e}")
+					await update.message.reply_text(
+						f"⚠️ Ошибка генерации для дней {block_start}-{block_end}. Перехожу к следующему блоку."
+					)
+					continue
 
-        except Exception as e:
-            print("Planner Fatal Error:", e)
-            await update.message.reply_text(
-                "❌ Ошибка при генерации плана. Попробуй ещё раз."
-            )
-
-        session["state"] = "menu_roles"
-        kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
-        await update.message.reply_text(
-            "✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb)
-        )
-        return
+			# финал
+			session["state"] = "menu_roles"
+			kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+			await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+			return
 
     # === Reels ===
     if session.get("state") == "reels_topic":
