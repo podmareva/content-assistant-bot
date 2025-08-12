@@ -9,6 +9,37 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import openai
 
+import re
+
+MAX_TG = 4096
+
+async def send_long_text(chat_id: int, text: str, context, parse_mode=None):
+    """
+    Делит длинный текст на части и отправляет по очереди,
+    чтобы Telegram ничего не обрезал.
+    Режем по пустым строкам и заголовкам "День N:".
+    """
+    parts = []
+    buf = ""
+
+    tokens = re.split(r'(?=День\s+\d+:)|\n{2,}', text or "")
+
+    for t in tokens:
+        if not t:
+            continue
+        if len(buf) + len(t) + 1 > MAX_TG - 50:
+            if buf.strip():
+                parts.append(buf.strip())
+            buf = t
+        else:
+            buf += ("\n\n" if buf else "") + t
+
+    if buf.strip():
+        parts.append(buf.strip())
+
+    for chunk in parts:
+        await context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode)
+
 print(">>> Бот загружен, bot.py — FIX (psycopg v3 + PTB21)")
 
 # === Настройки окружения ===
@@ -24,6 +55,15 @@ if not DATABASE_URL:
 # === Подключение к PostgreSQL (psycopg v3) ===
 conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
 cur = conn.cursor()
+# Храним ранее сгенерированные идеи/заголовки
+cur.execute("""
+CREATE TABLE IF NOT EXISTS used_ideas (
+  user_id   BIGINT      NOT NULL,
+  idea      TEXT        NOT NULL,
+  created_at TIMESTAMP  NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, idea)
+)
+""")
 
 # === Приложение PTB 21 ===
 app = Application.builder().token(BOT_TOKEN).build()
@@ -101,10 +141,78 @@ def sanitize_ad_text(text: str) -> str:
     )
 
 
+# Разбиваем длинный текст по заголовкам "День N:" и пустым строкам,
+# чтобы не рвать посреди дня/пункта.
 async def send_long_message(chat_id: int, text: str, context: ContextTypes.DEFAULT_TYPE):
-    MAX = 4000
-    for i in range(0, len(text), MAX):
-        await context.bot.send_message(chat_id=chat_id, text=text[i : i + MAX])
+    MAX_TG = 4096
+    parts = []
+    buf = ""
+
+    # Разделяем по "День N:" и по пустым строкам
+    tokens = re.split(r'(?=День\s+\d+:)|\n{2,}', text or "")
+
+    for t in tokens:
+        if not t:
+            continue
+        if len(buf) + len(t) + 2 > MAX_TG - 50:  # небольшой запас
+            if buf.strip():
+                parts.append(buf.strip())
+            buf = t
+        else:
+            buf += ("\n\n" if buf else "") + t
+
+    if buf.strip():
+        parts.append(buf.strip())
+
+    for chunk in parts:
+        await context.bot.send_message(chat_id=chat_id, text=chunk)
+
+# === Анти-повторы идей (извлечь / сохранить / загрузить) ===
+import re  # если уже импортирован выше — повторять не надо
+
+IDEA_RE = re.compile(r"Заголовок:\s*(.+?)(?:\n|$|•)", re.IGNORECASE)
+
+def extract_ideas_from_plan(text: str) -> list[str]:
+    """
+    Достаём все значения после 'Заголовок:' из плана.
+    Работает с строками вида:
+    • Сторис — Заголовок: ...
+    • Рилс/Пост — Заголовок: ...
+    """
+    ideas = []
+    for m in IDEA_RE.finditer(text or ""):
+        idea = m.group(1).strip()
+        idea = re.sub(r"\s+", " ", idea)  # лёгкая чистка
+        if idea:
+            ideas.append(idea)
+
+    # убираем дубли внутри одного плана, сохраняя порядок
+    seen = set()
+    uniq = []
+    for i in ideas:
+        if i not in seen:
+            seen.add(i)
+            uniq.append(i)
+    return uniq
+
+def save_used_ideas(user_id: int, ideas: list[str]) -> None:
+    if not ideas:
+        return
+    with conn.cursor() as c:
+        c.executemany(
+            "INSERT INTO used_ideas(user_id, idea) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            [(user_id, i) for i in ideas]
+        )
+
+def load_used_ideas(user_id: int, limit: int = 400) -> list[str]:
+    with conn.cursor() as c:
+        c.execute(
+            "SELECT idea FROM used_ideas WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
+            (user_id, limit),
+        )
+        rows = c.fetchall()
+    # conn создан с row_factory=dict_row, поэтому rows — это список словарей
+    return [r["idea"] for r in rows]
 
 
 def is_allowed(user_id: int) -> bool:
@@ -439,7 +547,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         elif step == 3:
-            # Первый сегмент ЦА -> запускаем цикл сегментов
             session.setdefault("audience_segments", []).append(text)
             session["state"] = "collecting_audience_multiple"
             kb = [
@@ -450,7 +557,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "✅ Сегмент #1 добавлен. Хочешь прислать ещё сегмент ЦА? (Да/Нет)",
                 reply_markup=InlineKeyboardMarkup(kb),
             )
-            return
+            return   # ← вот эту строку добавить
+
 
     # Добавление доп. продуктов (альтернативный поток через кнопки add_product/no_more_products)
     if session.get("state") == "collecting_more_products":
@@ -467,7 +575,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Многосегментная ЦА (если используешь)
     if session.get("state") == "collecting_audience_multiple":
-        session.setdefault("audience_segments", []).append(text)
+        session["audience_segments"].append(text)
         kb = [
             [InlineKeyboardButton("Да",  callback_data="add_audience_segment")],
             [InlineKeyboardButton("Нет", callback_data="audience_done")],
@@ -475,7 +583,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "✅ Сегмент добавлен. Хочешь прислать ещё сегмент ЦА? (Да/Нет)",
             reply_markup=InlineKeyboardMarkup(kb),
-)
+        )
+        return   # ← добавить, чтобы не падать в «не понял команду»
 
     # Доп.инфа
     if session.get("state") == "waiting_extra_info":
@@ -642,8 +751,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for block_start in range(1, total_days + 1, 5):
                 block_end = min(block_start + 4, total_days)
 
+                # <<< ВСТАВЬ СЮДА (сразу после block_end) >>>
+                user_id = update.effective_user.id
+                prev_ideas = load_used_ideas(user_id)              # из БД
+                used_ideas = "; ".join(prev_ideas) or "—"
+
+                # соберём список сегментов ЦА, которые пользователь прислал
+                segments_str = "; ".join(session.get("audience_segments", [])) or "не задано"
+
                 prompt = f"""
-Ты контент-планировщик. Твоя задача – создать развернутый, детализированный, уникальный контент-план.
+Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
+жёстко опираясь на ввод пользователя.
 
 === ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===
 {context_text}
@@ -655,63 +773,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👤 От чьего лица вести: {face}
 
 === АНАЛИЗ ЦЕЛЕВОЙ АУДИТОРИИ ===
-Пользователь прислал несколько сегментов ЦА. Для каждого дня указывай, для какого сегмента подходит контент (или для нескольких). Обязательно используй данные сегментов, а не пиши общие советы.
+Сегменты ЦА: {segments_str}
+У пользователя несколько сегментов ЦА. В КАЖДОМ дне явно указывай, для какого сегмента сделан контент
+(один или несколько). Запрещены общие советы — используй именно сегменты из ввода.
 
-=== УСЛОВИЯ ===
-- Генерируй только для Дней {block_start}–{block_end}.
-- НЕ повторяй темы, идеи, CTA и сегменты ЦА, которые уже были в предыдущих блоках.
-- Каждый новый блок должен быть полностью уникальным, добавлять новые форматы, рубрики, механики.
-- Контент должен развиваться: первые блоки – знакомство, вовлечение, экспертность; следующие – прогрев, кейсы, продажи.
+=== ОГРАНИЧЕНИЯ И ЛОГИКА ===
+- Генерируй только для дней {block_start}–{block_end} включительно и перечисляй дни по порядку.
+- Не повторяй темы, форматы, механики, заголовки и CTA, которые встречались ранее (список использованного): {used_ideas}.
+  Считай повтором не только точные совпадения, но и смысловые дубликаты.
+- Внутри текущего блока тоже не повторяйся.
+- В каждом 5-дневном промежутке должны встретиться ВСЕ рубрики (Экспертность, Вовлечение, Личное, Кейсы, Продажи).
+  Не ставь одну рубрику более 2 дней подряд.
+- Контент должен развиваться по воронке: знакомство/вовлечение → прогрев/возражения → кейсы/соцдоказательства → офферы/продажи.
+- Привязывай каждый день к ЭТАПУ воронки (холодная/тёплая/горячая).
+- Каждый день — 2 единицы контента: «Сторис» + («Рилс» ИЛИ «Пост-карусель»).
+- КАЖДЫЙ элемент дня: чёткий заголовок, 1–2 предложения идеи, один «хук», конкретный CTA, пометка [Сегмент ЦА: …].
+- Избегай длиннот: каждый пункт ≤ 150 символов. Никаких «и т.д.», «можно добавить», общих фраз.
+- Рекомендации по визуалу — практичные (ракурсы, кадры, сцены, текст-оверлеи), без расплывчатых «красивых фото».
 
-=== ТРЕБОВАНИЯ К ПЛАНУ ===
-- Выдай контент полностью для этих дней, без сокращений и "и так далее"
-- НЕ повторяй темы, форматы и идеи, которые уже использовались ранее
-- Каждый день обязан быть уникальным и отличаться от предыдущих
-– Каждый день должен включать: сторис + (или рилс / рилс + пост-карусель)
-– Укажи для каждого дня: тему, формат, цель, CTA, идеи сторис, визуальные подсказки
-– Раздели контент по рубрикатору: экспертность, вовлечение, личное, кейсы, продажи
-– Привяжи каждый день к этапу воронки: холодная, тёплая, горячая аудитория
-– Добавляй пометку [Сегмент ЦА: ...] для каждого элемента контента
-– Убедись, что дни идут строго по порядку: {block_start}, {block_start+1}, {block_start+2} ... {block_end}.
-
-=== ФОРМАТ ВЫВОДА ===
+=== ФОРМАТ ВЫВОДА (строго как здесь) ===
 День {block_start}:
-• Сторис – тема, идея, CTA [Сегмент ЦА: сегмент1]
-• Рилс/Пост – тема, формат, краткий сценарий, CTA [Сегмент ЦА: сегмент2]
+• Рубрика: <Экспертность/Вовлечение/Личное/Кейсы/Продажи> • Этап: <Холодная/Тёплая/Горячая>
+• Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
+• Рилс/Пост — Заголовок: <...> • Формат: <Рилс|Карусель> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
+• Визуал: <3–5 подсказок для визуала>
 
 День {block_start+1}:
-• …
+• Рубрика: <...> • Этап: <...>
+• Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
+• Рилс/Пост — Заголовок: <...> • Формат: <...> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
+• Визуал: <...>
 
-=== СПЕЦИФИКА ===
-– План должен быть практичным, а не общими советами
-– Используй тренды 2024–2025: Reels, сторис, интерактивные карусели, behind-the-scenes, UGC
-– Добавляй новые идеи для визуала, вовлечения и механик
-– В каждом блоке добавляй НОВЫЕ рубрики и форматы, которых не было в предыдущих блоках
+...
+День {block_end}:
+• Рубрика: <...> • Этап: <...>
+• Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
+• Рилс/Пост — Заголовок: <...> • Формат: <...> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
+• Визуал: <...>
 
-⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025, исключи запрещённые обещания, используй корректные формулировки.
+=== ТРЕБОВАНИЯ К КАЧЕСТВУ ===
+- Темы обязательны: из распаковки, позиционирования, продуктов и сегментов ЦА пользователя — не придумывай «в вакууме».
+- Рубрики чередуй; форматы и механики варьируй (UGC, behind-the-scenes, челлендж, мини-гайд, кейс-разбор, FAQ, сравнение, миф/факт).
+- Для повторных запросов от того же пользователя генерируй принципиально новые темы, сверяясь с {used_ideas}.
+- Не повторяй ранее использованные идеи: {used_ideas}
+- Язык: русский, деловой и дружелюбный тон.
 
-⚠️ ВАЖНО: 
-– Не повторяй темы, CTA, форматы и идеи, которые уже использовались ранее.  
-– Каждый новый блок обязан быть уникальным, добавлять новые рубрики, примеры, сюжеты и механики.  
-– Делай постепенное развитие контента: от знакомства и вовлечения – к прогреву и продажам.  
-– Используй разные сегменты ЦА для каждого дня, чтобы избежать повторов.  
-– Привязывай каждый новый день к предыдущему (контент должен развиваться, а не быть случайным). 
-
-Не повторяй ранее использованные идеи: {used_ideas}
+⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
+
                 try:
                     await update.message.reply_text(
                         f"⏳ Генерирую Дни {block_start}-{block_end}..."
                     )
                     response = openai.ChatCompletion.create(
-                        model="gpt-3.5-turbo",
-                        temperature=0.8,
-                        max_tokens=1500,
-                        messages=[{"role": "user", "content": prompt}],
+                    model="gpt-3.5-turbo",
+                    temperature=0.8,
+                    max_tokens=1500,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                result = sanitize_ad_text(response["choices"][0]["message"]["content"])
+
+                # >>> добавляем эти две строки <<<
+                new_ideas = extract_ideas_from_plan(result)
+                save_used_ideas(update.effective_user.id, new_ideas)
                     )
-                    result = sanitize_ad_text(
-                        response["choices"][0]["message"]["content"]
-                    )
+                    
                     previous_context += f"\n{result}"
                     all_results.append(result)
                     await send_long_message(update.effective_chat.id, result, context)
