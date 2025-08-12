@@ -791,8 +791,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)..."
         )
 
-        for block_start in range(1, total_days + 1, 5):
-            block_end = min(block_start + 4, total_days)
+        for block_start in range(1, total_days + 1, 3):
+            block_end = min(block_start + 2, total_days)
             await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
             user_id = update.effective_user.id
@@ -871,7 +871,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     messages=[{"role": "user", "content": prompt}],
                 )
                 plan = response["choices"][0]["message"]["content"]
-                
+            
+                    try:
+                        new_ideas = extract_ideas_from_plan(plan)
+                        save_used_ideas(user_id, new_ideas)
+                    except Exception as e:
+                        print("Save ideas error:", e)
+            
                 # === добираем недостающие дни, если модель вывела не все ===
                 def missing_days(text: str, start: int, end: int):
                     found = set(int(n) for n in re.findall(r"День\s+(\d+):", text or ""))
@@ -911,11 +917,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await send_long_message(update.effective_chat.id, plan, context)
 
             except Exception as e:
-                print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
+                import traceback
+                print("\n=== Planner error ===")
+                print(f"Block: {block_start}-{block_end}")
+                print("Error type:", type(e).__name__)
+                print("Error:", e)
+                traceback.print_exc()
                 await update.message.reply_text(
-                    f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
+                    f"⚠️ Ошибка генерации для дней {block_start}-{block_end}. Пробую следующий блок…"
                 )
-                continue  # <— работает, потому что мы внутри for
+                continue
 
         # финал планировщика
         session["state"] = "menu_roles"
