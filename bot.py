@@ -778,11 +778,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 2.2 Основной цикл генерации
         BLOCK_SIZE = 5  # по умолчанию 5; при ошибке попробуем 3
 
-        for block_start in range(1, total_days + 1, BLOCK_SIZE):
-            block_end = min(block_start + (BLOCK_SIZE - 1), total_days)
+        for block_start in range(1, total_days + 1, 5):
+            block_end = min(block_start + 4, total_days)
 
-            def make_prompt(bs, be):
-                return f"""
+            await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
+
+            # 1) анти-повторы + сегменты ЦА
+            user_id = update.effective_user.id
+            prev_ideas = load_used_ideas(user_id)
+            used_ideas = "; ".join(prev_ideas) or "—"
+            segments_str = "; ".join(session.get("audience_segments", [])) or "не задано"
+
+            # 2) ПРОМПТ — он здесь!
+            prompt = f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
 жёстко опираясь на ввод пользователя.
 
@@ -844,50 +852,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
 
-                await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
+            try:
+                # запрос к OpenAI
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    temperature=0.8,
+                    max_tokens=1500,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                plan = response["choices"][0]["message"]["content"]
 
-                # 2.3 Попытка №1 — блок размером 5
-                try_prompt = make_prompt(block_start, block_end)
-                try:
-                    raw = openai_chat(messages=[{"role": "user", "content": try_prompt}],
-                                       temperature=0.8, max_tokens=1800, attempts=2)
-                    result = sanitize_ad_text(raw)
-                except Exception as e1:
-                    # 2.4 Попытка №2 — уменьшаем блок до 3 дней
-                    print(f"[planner] fail {block_start}-{block_end} (5 дней):", e1)
-                    small_end = min(block_start + 2, total_days)
-                    await update.message.reply_text(f"⚠️ Ошибка. Пробую сгенерировать по 3 дня ({block_start}-{small_end}).")
-                    try_prompt_small = make_prompt(block_start, small_end)
-                    try:
-                        raw = openai_chat(messages=[{"role": "user", "content": try_prompt_small}],
-                                           temperature=0.8, max_tokens=1600, attempts=3)
-                        result = sanitize_ad_text(raw)
-                        block_end = small_end  # фактически сгенерировали 3 дня
-                    except Exception as e2:
-                        print(f"[planner] fail {block_start}-{small_end} (3 дня):", e2)
-                        await update.message.reply_text(
-                            f"❌ Не удалось сгенерировать блок дней {block_start}-{block_end}. Перехожу дальше."
-                        )
-                        continue  # к следующему блоку
+                # сохраняем идеи (анти-повторы) — до отправки пользователю
+                new_ideas = extract_ideas_from_plan(plan)
+                save_used_ideas(update.effective_user.id, new_ideas)
 
-                # 2.5 Отправка и сохранение идей
-                try:
-                    new_ideas = extract_ideas_from_plan(result)
-                    if new_ideas:
-                        save_used_ideas(user_id, new_ideas)
-                        used_ideas_pool = (used_ideas_pool + "\n" + "\n".join(new_ideas))[-4000:]
-                except Exception as e:
-                    print("[planner] ideas save error:", e)
+                # опционально ведём контекст/историю блока
+                previous_context += f"\n{plan}"
+                all_results.append(plan)
 
-                previous_context += f"\n{result}"
-                all_results.append(result)
-                await send_long_message(update.effective_chat.id, result, context)
+                # отправляем блок пользователю (с безопасным разбиением по «День N»)
+                await send_long_message(update.effective_chat.id, plan, context)
 
-            # финал
-            session["state"] = "menu_roles"
-            kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
-            await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
-            return
+            except Exception as e:
+                print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
+                await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}-{block_end}.")
+                continue
+
+session["state"] = "menu_roles"
+kb = [
+    [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
+    [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
+    [InlineKeyboardButton("🎬 Reels",       callback_data="role_reels")],
+]
+await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+return
 
     # === Reels ===
     if session.get("state") == "reels_topic":
