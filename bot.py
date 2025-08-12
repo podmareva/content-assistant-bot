@@ -823,40 +823,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 try:
                     await update.message.reply_text(
-                        f"⏳ Генерирую Дни {block_start}-{block_end}..."
+                        f"⏳ Генерирую дни {block_start}-{block_end}..."
                     )
-                    response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    temperature=0.8,
-                    max_tokens=1500,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                result = sanitize_ad_text(response["choices"][0]["message"]["content"])
 
-                # >>> добавляем эти две строки <<<
-                new_ideas = extract_ideas_from_plan(result)
-                save_used_ideas(update.effective_user.id, new_ideas)
-                    
-                    previous_context += f"\n{result}"
-                    all_results.append(result)
-                    await send_long_message(update.effective_chat.id, result, context)
+                    try:
+                        response = openai.ChatCompletion.create(
+                            model="gpt-3.5-turbo",
+                            temperature=0.8,
+                            max_tokens=1500,
+                            messages=[{"role": "user", "content": prompt}],
+                        )
+
+                        result = sanitize_ad_text(response["choices"][0]["message"]["content"])
+                        new_ideas = extract_ideas_from_plan(result)
+                        save_used_ideas(update.effective_user.id, new_ideas)
+
+                        previous_context += f"\n{result}"
+                        all_results.append(result)
+                        await send_long_message(update.effective_chat.id, result, context)
+
+                    except Exception as e:
+                        print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
+                        await update.message.reply_text(
+                            f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
+                        )
+
                 except Exception as e:
-                    print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
+                    print("Planner Fatal Error:", e)
                     await update.message.reply_text(
-                        f"⚠️ Ошибка генерации для дней {block_start}–{block_end}."
+                        "❌ Ошибка при генерации плана. Попробуй ещё раз."
                     )
-        except Exception as e:
-            print("Planner Fatal Error:", e)
-            await update.message.reply_text(
-                "❌ Ошибка при генерации плана. Попробуй ещё раз."
-            )
-
-        session["state"] = "menu_roles"
-        kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
-        await update.message.reply_text(
-            "✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb)
-        )
-        return
+                    
 
     # === Reels ===
     if session.get("state") == "reels_topic":
