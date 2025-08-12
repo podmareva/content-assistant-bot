@@ -867,10 +867,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 response = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
                     temperature=0.8,
-                    max_tokens=1500,
+                    max_tokens=2500,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 plan = response["choices"][0]["message"]["content"]
+            # === добираем недостающие дни, если модель вывела не все ===
+    def _missing_days(text: str, start: int, end: int) -> list[int]:
+        found = set(int(n) for n in re.findall(r"День\s+(\d+):", text or ""))
+        return [d for d in range(start, end + 1) if d not in found]
+
+    missing = _missing_days(plan, block_start, block_end)
+
+    # максимум 2 дозапроса, чтобы не зависнуть бесконечно
+    _attempts = 0
+    while missing and _attempts < 2:
+        _attempts += 1
+        cont_from = missing[0]
+        cont_prompt = f"""
+    Продолжи контент-план в точно таком же формате.
+    ВЫДАЙ строго дни {cont_from}–{block_end} (если какие-то уже есть — не повторяй).
+    Сохраняй стиль, структуру и требования. Не переписывай ранее выданные дни.
+
+    Вот что уже сгенерировано (для контекста):
+    {plan}
+    """
+
+        cont_resp = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            temperature=0.8,
+            max_tokens=2000,
+            messages=[{"role": "user", "content": cont_prompt}],
+        )
+        addition = cont_resp["choices"][0]["message"]["content"]
+        plan += "\n\n" + addition
+        # пересчитаем, что ещё отсутствует
+        missing = _missing_days(plan, block_start, block_end)
+
 
                 new_ideas = extract_ideas_from_plan(plan)
                 save_used_ideas(user_id, new_ideas)
