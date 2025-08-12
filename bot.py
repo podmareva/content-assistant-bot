@@ -8,13 +8,41 @@ from psycopg.rows import dict_row
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import openai
+
+import re
+
+MAX_TG = 4096
+
+async def send_long_text(chat_id: int, text: str, context, parse_mode=None):
+    """
+    Делит длинный текст на части и отправляет по очереди,
+    чтобы Telegram ничего не обрезал.
+    Режем по пустым строкам и заголовкам "День N:".
+    """
+    parts = []
+    buf = ""
+
+    tokens = re.split(r'(?=День\s+\d+:)|\n{2,}', text or "")
+
+    for t in tokens:
+        if not t:
+            continue
+        if len(buf) + len(t) + 1 > MAX_TG - 50:
+            if buf.strip():
+                parts.append(buf.strip())
+            buf = t
+        else:
+            buf += ("\n\n" if buf else "") + t
+
+    if buf.strip():
+        parts.append(buf.strip())
+
+    for chunk in parts:
+        await context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode)
+
 import time
 
-print(">>> Бот загружен, bot.py — FIX (psycopg v3 + PTB21)")
-
-
-def openai_chat(messages, *, max_tokens=1800, temperature=0.8, attempts=3):
-    """Надёжный вызов ChatCompletion с ретраями и проверкой пустого ответа."""
+def openai_chat(messages, *, max_tokens=1600, temperature=0.8, attempts=3):
     last_err = None
     for i in range(1, attempts + 1):
         try:
@@ -24,15 +52,14 @@ def openai_chat(messages, *, max_tokens=1800, temperature=0.8, attempts=3):
                 max_tokens=max_tokens,
                 messages=messages,
             )
-            content = r["choices"][0]["message"]["content"]
-            if not content or not content.strip():
-                raise ValueError("Пустой ответ модели")
-            return content.strip()
+            return r["choices"][0]["message"]["content"]
         except Exception as e:
             last_err = e
-            print(f"[openai_chat] попытка {i}/{attempts} не удалась:", e)
+            print(f"[openai_chat] attempt {i}/{attempts} failed:", e)
             time.sleep(1.5 * i)
     raise last_err
+
+print(">>> Бот загружен, bot.py — FIX (psycopg v3 + PTB21)")
 
 # === Настройки окружения ===
 load_dotenv()
@@ -47,6 +74,15 @@ if not DATABASE_URL:
 # === Подключение к PostgreSQL (psycopg v3) ===
 conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
 cur = conn.cursor()
+# Храним ранее сгенерированные идеи/заголовки
+cur.execute("""
+CREATE TABLE IF NOT EXISTS used_ideas (
+  user_id   BIGINT      NOT NULL,
+  idea      TEXT        NOT NULL,
+  created_at TIMESTAMP  NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, idea)
+)
+""")
 
 # === Приложение PTB 21 ===
 app = Application.builder().token(BOT_TOKEN).build()
@@ -61,18 +97,6 @@ cur.execute(
     );
     """
 )
-
-# --- Таблица для истории использованных идей (для устранения повторов) ---
-cur.execute(
-    """
-    CREATE TABLE IF NOT EXISTS used_ideas (
-        user_id BIGINT PRIMARY KEY,
-        ideas TEXT NOT NULL,
-        updated_at TIMESTAMPTZ DEFAULT now()
-    );
-    """
-)
-
 cur.execute(
     """
     CREATE TABLE IF NOT EXISTS tokens (
@@ -136,60 +160,79 @@ def sanitize_ad_text(text: str) -> str:
     )
 
 
+# Разбиваем длинный текст по заголовкам "День N:" и пустым строкам,
+# чтобы не рвать посреди дня/пункта.
 async def send_long_message(chat_id: int, text: str, context: ContextTypes.DEFAULT_TYPE):
-    MAX = 4000
-    for i in range(0, len(text), MAX):
-        await context.bot.send_message(chat_id=chat_id, text=text[i : i + MAX])
+    MAX_TG = 4096
+    parts = []
+    buf = ""
 
+    # Разделяем по "День N:" и по пустым строкам
+    tokens = re.split(r'(?=День\s+\d+:)|\n{2,}', text or "")
 
-def load_used_ideas(user_id: int) -> list[str]:
-    try:
-        cur.execute("SELECT ideas FROM used_ideas WHERE user_id=%s", (user_id,))
-        row = cur.fetchone()
-        if not row or not row.get("ideas"):
-            return []
-        return [s for s in row["ideas"].split("\n") if s.strip()]
-    except Exception as e:
-        print("[used_ideas] load error:", e)
-        return []
+    for t in tokens:
+        if not t:
+            continue
+        if len(buf) + len(t) + 2 > MAX_TG - 50:  # небольшой запас
+            if buf.strip():
+                parts.append(buf.strip())
+            buf = t
+        else:
+            buf += ("\n\n" if buf else "") + t
 
-def save_used_ideas(user_id: int, new_ideas: list[str]) -> None:
-    try:
-        pool = load_used_ideas(user_id)
-        exists = set(pool)
-        for idea in new_ideas:
-            idea = idea.strip()
-            if idea and idea not in exists:
-                pool.append(idea)
-                exists.add(idea)
-        if len(pool) > 200:
-            pool = pool[-200:]
-        merged = "\n".join(pool)
-        cur.execute(
-            "INSERT INTO used_ideas(user_id, ideas, updated_at) VALUES(%s, %s, now()) "
-            "ON CONFLICT (user_id) DO UPDATE SET ideas = EXCLUDED.ideas, updated_at = now()",
-            (user_id, merged)
-        )
-    except Exception as e:
-        print("[used_ideas] save error:", e)
+    if buf.strip():
+        parts.append(buf.strip())
+
+    for chunk in parts:
+        await context.bot.send_message(chat_id=chat_id, text=chunk)
+
+# === Анти-повторы идей (извлечь / сохранить / загрузить) ===
+import re  # если уже импортирован выше — повторять не надо
+
+IDEA_RE = re.compile(r"Заголовок:\s*(.+?)(?:\n|$|•)", re.IGNORECASE)
 
 def extract_ideas_from_plan(text: str) -> list[str]:
+    """
+    Достаём все значения после 'Заголовок:' из плана.
+    Работает с строками вида:
+    • Сторис — Заголовок: ...
+    • Рилс/Пост — Заголовок: ...
+    """
     ideas = []
-    for m in re.finditer(r"Заголовок:\s*(.+?)\s*(?:\n|$)", text, flags=re.I):
-        s = m.group(1).strip()
-        if s and len(s) <= 200:
-            ideas.append(s)
-    for m in re.finditer(r"•\s*(?:Сторис|Рилс/Пост|Пост|Рилс)[^\n]*?:\s*(.+?)\s*(?:\n|$)", text, flags=re.I):
-        s = m.group(1).strip()
-        if s and len(s) <= 200:
-            ideas.append(s)
+    for m in IDEA_RE.finditer(text or ""):
+        idea = m.group(1).strip()
+        idea = re.sub(r"\s+", " ", idea)  # лёгкая чистка
+        if idea:
+            ideas.append(idea)
+
+    # убираем дубли внутри одного плана, сохраняя порядок
     seen = set()
-    out = []
-    for s in ideas:
-        if s not in seen:
-            seen.add(s)
-            out.append(s)
-    return out[:50]
+    uniq = []
+    for i in ideas:
+        if i not in seen:
+            seen.add(i)
+            uniq.append(i)
+    return uniq
+
+def save_used_ideas(user_id: int, ideas: list[str]) -> None:
+    if not ideas:
+        return
+    with conn.cursor() as c:
+        c.executemany(
+            "INSERT INTO used_ideas(user_id, idea) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            [(user_id, i) for i in ideas]
+        )
+
+def load_used_ideas(user_id: int, limit: int = 400) -> list[str]:
+    with conn.cursor() as c:
+        c.execute(
+            "SELECT idea FROM used_ideas WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
+            (user_id, limit),
+        )
+        rows = c.fetchall()
+    # conn создан с row_factory=dict_row, поэтому rows — это список словарей
+    return [r["idea"] for r in rows]
+
 
 def is_allowed(user_id: int) -> bool:
     if user_id == ADMIN_ID:
@@ -523,7 +566,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         elif step == 3:
-            # Первый сегмент ЦА -> запускаем цикл сегментов
             session.setdefault("audience_segments", []).append(text)
             session["state"] = "collecting_audience_multiple"
             kb = [
@@ -534,7 +576,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "✅ Сегмент #1 добавлен. Хочешь прислать ещё сегмент ЦА? (Да/Нет)",
                 reply_markup=InlineKeyboardMarkup(kb),
             )
-            return
+            return   # ← вот эту строку добавить
+
 
     # Добавление доп. продуктов (альтернативный поток через кнопки add_product/no_more_products)
     if session.get("state") == "collecting_more_products":
@@ -551,7 +594,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Многосегментная ЦА (если используешь)
     if session.get("state") == "collecting_audience_multiple":
-        session.setdefault("audience_segments", []).append(text)
+        session["audience_segments"].append(text)
         kb = [
             [InlineKeyboardButton("Да",  callback_data="add_audience_segment")],
             [InlineKeyboardButton("Нет", callback_data="audience_done")],
@@ -559,7 +602,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "✅ Сегмент добавлен. Хочешь прислать ещё сегмент ЦА? (Да/Нет)",
             reply_markup=InlineKeyboardMarkup(kb),
-)
+        )
+        return   # ← добавить, чтобы не падать в «не понял команду»
 
     # Доп.инфа
     if session.get("state") == "waiting_extra_info":
@@ -594,6 +638,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # FIX: безопасные плейсхолдеры вместо необъявленных переменных
             used_ideas = ""
             days = ""
+            history = "\n".join(load_used_ideas(user_id)) if 'load_used_ideas' in globals() else ""
 
             prompt = f"""
 Ты профессиональный копирайтер и упаковщик. Создай {session['task']} для блогера/эксперта/бренда.
@@ -644,8 +689,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - Не повторяй идеи, CTA, структуру и примеры, использованные ранее.  
 - Для каждого текста добавляй новые креативные механики и неожиданные ходы.  
 - Используй разные подходы: истории, факты, неожиданные советы, чтобы каждый материал был свежим.  
-- Не используй ранее применённые идеи: {used_ideas_pool[-2000:]}  
-
+- Не используй ранее применённые идеи: {history[-2000:]}
+ 
 ⚖️ Соблюдай Федеральный закон №38-ФЗ и №72-ФЗ от 07.04.2025:  
 не используй фразы «100% результат», «лучший», «гарантировано»,  
 заменяй их корректными альтернативами: «один из популярных вариантов», «подходит для…», «узнай подробнее».  
@@ -709,24 +754,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             total_days = int(days.strip())
         except Exception:
-            await update.message.reply_text(
-                "❌ Укажи количество дней числом (7, 14, 21, 30)."
-            )
+            await update.message.reply_text("❌ Укажи количество дней числом (7, 14, 21, 30).")
             return
 
-        await update.message.reply_text(
-            f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)..."
-        )
+        # Подтверждение
+        await update.message.reply_text(f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)...")
 
         previous_context = ""
         all_results = []
-        used_ideas = ""
 
+        # 2.1 Определи сегменты и историю идей
+        segments = session.get("audience_segments", [])
+        segments_str = " | ".join(segments) if segments else "—"
+
+        # история ранее использованных идей из БД (у тебя есть load_used_ideas)
         try:
-            for block_start in range(1, total_days + 1, 5):
-                block_end = min(block_start + 4, total_days)
+            history_list = load_used_ideas(user_id)
+        except Exception as e:
+            print("[used_ideas] load error:", e)
+            history_list = []
+        used_ideas_pool = "\n".join(history_list)  # строка
 
-                prompt = f"""
+        # 2.2 Основной цикл генерации
+        BLOCK_SIZE = 5  # по умолчанию 5; при ошибке попробуем 3
+
+        for block_start in range(1, total_days + 1, BLOCK_SIZE):
+            block_end = min(block_start + (BLOCK_SIZE - 1), total_days)
+
+            def make_prompt(bs, be):
+                return f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
 жёстко опираясь на ввод пользователя.
 
@@ -745,7 +801,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 (один или несколько). Запрещены общие советы — используй именно сегменты из ввода.
 
 === ОГРАНИЧЕНИЯ И ЛОГИКА ===
-- Генерируй только для дней {block_start}–{block_end} включительно и перечисляй дни по порядку.
+- Генерируй только для дней {bs}–{be} включительно и перечисляй дни по порядку.
 - Не повторяй темы, форматы, механики, заголовки и CTA, которые встречались ранее (список использованного): {used_ideas_pool[-2000:]}.
   Считай повтором не только точные совпадения, но и смысловые дубликаты.
 - Внутри текущего блока тоже не повторяйся.
@@ -759,20 +815,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - Рекомендации по визуалу — практичные (ракурсы, кадры, сцены, текст-оверлеи), без расплывчатых «красивых фото».
 
 === ФОРМАТ ВЫВОДА (строго как здесь) ===
-День {block_start}:
+День {bs}:
 • Рубрика: <Экспертность/Вовлечение/Личное/Кейсы/Продажи> • Этап: <Холодная/Тёплая/Горячая>
 • Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Рилс/Пост — Заголовок: <...> • Формат: <Рилс|Карусель> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Визуал: <3–5 подсказок для визуала>
 
-День {block_start+1}:
+День {bs+1}:
 • Рубрика: <...> • Этап: <...>
 • Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Рилс/Пост — Заголовок: <...> • Формат: <...> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Визуал: <...>
 
 ...
-День {block_end}:
+День {be}:
 • Рубрика: <...> • Этап: <...>
 • Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Рилс/Пост — Заголовок: <...> • Формат: <...> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
@@ -787,37 +843,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
+
+                await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
+
+                # 2.3 Попытка №1 — блок размером 5
+                try_prompt = make_prompt(block_start, block_end)
                 try:
-                    await update.message.reply_text(
-                        f"⏳ Генерирую Дни {block_start}-{block_end}..."
-                    )
-                    raw = openai_chat(messages=[{"role": "user", "content": prompt}], temperature=0.8, max_tokens=1800, attempts=2)
+                    raw = openai_chat(messages=[{"role": "user", "content": try_prompt}],
+                                       temperature=0.8, max_tokens=1800, attempts=2)
                     result = sanitize_ad_text(raw)
+                except Exception as e1:
+                    # 2.4 Попытка №2 — уменьшаем блок до 3 дней
+                    print(f"[planner] fail {block_start}-{block_end} (5 дней):", e1)
+                    small_end = min(block_start + 2, total_days)
+                    await update.message.reply_text(f"⚠️ Ошибка. Пробую сгенерировать по 3 дня ({block_start}-{small_end}).")
+                    try_prompt_small = make_prompt(block_start, small_end)
+                    try:
+                        raw = openai_chat(messages=[{"role": "user", "content": try_prompt_small}],
+                                           temperature=0.8, max_tokens=1600, attempts=3)
+                        result = sanitize_ad_text(raw)
+                        block_end = small_end  # фактически сгенерировали 3 дня
+                    except Exception as e2:
+                        print(f"[planner] fail {block_start}-{small_end} (3 дня):", e2)
+                        await update.message.reply_text(
+                            f"❌ Не удалось сгенерировать блок дней {block_start}-{block_end}. Перехожу дальше."
+                        )
+                        continue  # к следующему блоку
+
+                # 2.5 Отправка и сохранение идей
+                try:
                     new_ideas = extract_ideas_from_plan(result)
                     if new_ideas:
                         save_used_ideas(user_id, new_ideas)
                         used_ideas_pool = (used_ideas_pool + "\n" + "\n".join(new_ideas))[-4000:]
-
-                    previous_context += f"\n{result}"
-                    all_results.append(result)
-                    await send_long_message(update.effective_chat.id, result, context)
                 except Exception as e:
-                    print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-                    await update.message.reply_text(
-                        f"⚠️ Ошибка генерации для дней {block_start}–{block_end}."
-                    )
-        except Exception as e:
-            print("Planner Fatal Error:", e)
-            await update.message.reply_text(
-                "❌ Ошибка при генерации плана. Попробуй ещё раз."
-            )
+                    print("[planner] ideas save error:", e)
 
-        session["state"] = "menu_roles"
-        kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
-        await update.message.reply_text(
-            "✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb)
-        )
-        return
+                previous_context += f"\n{result}"
+                all_results.append(result)
+                await send_long_message(update.effective_chat.id, result, context)
+
+            # финал
+            session["state"] = "menu_roles"
+            kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+            await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+            return
 
     # === Reels ===
     if session.get("state") == "reels_topic":
@@ -843,6 +913,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic, format_r, style, music = session["reels_data"]
         context_text = get_user_context(session)
         used_ideas = ""
+        history = "\n".join(load_used_ideas(user_id)) if 'load_used_ideas' in globals() else ""
 
         prompt = f"""
 Ты профессиональный продюсер коротких видео (Reels, TikTok, Shorts, ВК-клипы). Создай уникальный сценарий для видео по данным пользователя.
@@ -866,7 +937,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - Каждый новый сценарий должен быть уникальным, отличаться от ранее сгенерированных.  
 - Не повторяй идеи, хук, форматы и визуальные решения, которые уже использовались.  
 - Используй разные творческие подходы: необычные углы съёмки, свежие тренды, неожиданные сюжеты.  
-- Не используй ранее применённые идеи: {used_ideas_pool[-2000:]}  
+- Не используй ранее применённые идеи: {history[-2000:]}  
 
 === ТРЕБОВАНИЯ ===
 – Используй сторителлинг, эмоции, провокационные или цепляющие элементы.  
@@ -879,7 +950,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 заменяй их корректными альтернативами («один из популярных вариантов», «подходит для…», «узнай подробнее»).
 
 💡 Выдай сценарий в структурированном виде, готовый к съёмке, с уникальными элементами, которых не было ранее.
-Не повторяй ранее использованные идеи: {used_ideas_pool[-2000:]}
+Не повторяй ранее использованные идеи: {history[-2000:]}
 """
         await update.message.reply_text("🎬 Генерация сценария...")
         try:
@@ -899,7 +970,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # === Fallback ===
+    # === Fallback: показываем только когда нет активного сценария ===
+    active_states = {
+        "collecting_base_info", "product_decision", "collecting_more_products",
+        "collecting_audience_multiple", "waiting_extra_info",
+        "planner_goal", "planner_platform", "planner_frequency", "planner_face", "planner_days",
+        "reels_topic", "reels_format", "reels_style", "reels_music",
+    }
+    if session.get("state") in active_states or str(session.get("state","")).startswith("copywriter_"):
+        # игнорируем лишние сообщения во время сценариев
+        return
+
     await update.message.reply_text("🤔 Не понял команду. Нажми /start для начала.")
 
 
