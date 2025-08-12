@@ -842,11 +842,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
                     )
 
+        import traceback
+
         except Exception as e:
             print("Planner Fatal Error:", e)
+            traceback.print_exc()
             await update.message.reply_text(
-                "❌ Ошибка при генерации плана. Попробуй ещё раз."
-            )
+                f"❌ Ошибка при генерации плана: {e}"
+    )
 
         session["state"] = "menu_roles"
         kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
