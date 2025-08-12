@@ -812,8 +812,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
 
-            try:
-            # запрос к OpenAI (можно и через твою openai_chat(...))
+        try:
+            # запрос к OpenAI
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 temperature=0.8,
@@ -822,18 +822,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             plan = response["choices"][0]["message"]["content"]
 
-            # анти-повторы: сохраняем заголовки до отправки
+            # сохраняем идеи (анти-повторы)
             new_ideas = extract_ideas_from_plan(plan)
             save_used_ideas(user_id, new_ideas)
 
-            # отправка без обрезаний
+            # безопасная отправка длинного текста
             await send_long_message(update.effective_chat.id, plan, context)
 
         except Exception as e:
             print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-            await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}-{block_end}.")
+            await update.message.reply_text(
+                f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
+            )
             continue
-
+            
     # финал планировщика
     session["state"] = "menu_roles"
     kb = [
