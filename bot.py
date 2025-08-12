@@ -789,7 +789,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             used_ideas = "; ".join(prev_ideas) or "—"
             segments_str = "; ".join(session.get("audience_segments", [])) or "не задано"
 
-            # 2) ПРОМПТ — он здесь!
+            # 2) ПР# ===== Планировщик =====
+    if session.get("state") == "planner_days":
+        try:
+            total_days = int(days.strip())
+        except Exception:
+            await update.message.reply_text("❌ Укажи количество дней числом (7, 14, 21, 30).")
+            return
+
+        await update.message.reply_text(
+            f"🧩 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)..."
+        )
+
+        previous_context = ""
+        all_results = []
+
+        for block_start in range(1, total_days + 1, 5):
+            block_end = min(block_start + 4, total_days)
+
+            await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
+
+            # --- анти-повторы и сегменты ЦА ---
+            user_id = update.effective_user.id
+            prev_ideas = load_used_ideas(user_id)
+            used_ideas = "; ".join(prev_ideas) or "—"
+            segments_str = "; ".join(session.get("audience_segments", [])) or "не задано"
+
+            # --- СЮДА оставь свой огромный prompt = f""" ... """
+            # Внутри него используй {used_ideas} и (по желанию) строку
+            # "Сегменты ЦА: {segments_str}"
             prompt = f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
 жёстко опираясь на ввод пользователя.
@@ -864,28 +892,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 # сохраняем идеи (анти-повторы) — до отправки пользователю
                 new_ideas = extract_ideas_from_plan(plan)
-                save_used_ideas(update.effective_user.id, new_ideas)
+                save_used_ideas(user_id, new_ideas)
 
-                # опционально ведём контекст/историю блока
+                # опционально — ведём историю
                 previous_context += f"\n{plan}"
                 all_results.append(plan)
 
-                # отправляем блок пользователю (с безопасным разбиением по «День N»)
+                # безопасная отправка длинного текста
                 await send_long_message(update.effective_chat.id, plan, context)
 
             except Exception as e:
                 print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-                await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}-{block_end}.")
+                await update.message.reply_text(
+                    f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
+                )
                 continue
 
-session["state"] = "menu_roles"
-kb = [
-    [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
-    [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
-    [InlineKeyboardButton("🎬 Reels",       callback_data="role_reels")],
-]
-await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
-return
+        # ---- после цикла: завершаем сценарий планировщика ----
+        session["state"] = "menu_roles"
+        kb = [
+            [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
+            [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
+            [InlineKeyboardButton("🎬 Reels",       callback_data="role_reels")],
+        ]
+        await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+        return
 
     # === Reels ===
     if session.get("state") == "reels_topic":
