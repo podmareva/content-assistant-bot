@@ -739,10 +739,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             block_end = min(block_start + 4, total_days)
             await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
-            # анти-повторы + сегменты ЦА
             user_id = update.effective_user.id
-            prev_ideas = load_used_ideas(user_id)
-            used_ideas = "; ".join(prev_ideas) or "—"
+            prev_ideas  = load_used_ideas(user_id)
+            used_ideas  = "; ".join(prev_ideas) or "—"
             segments_str = "; ".join(session.get("audience_segments", [])) or "—"
 
             # ПРОМПТ — ВАЖНО: здесь {block_start}/{block_end} и {used_ideas}
@@ -808,37 +807,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
 
-        try:
-            # запрос к OpenAI
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                temperature=0.8,
-                max_tokens=1500,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            plan = response["choices"][0]["message"]["content"]
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    temperature=0.8,
+                    max_tokens=1500,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                plan = response["choices"][0]["message"]["content"]
 
-            # сохраняем идеи (анти-повторы) — до отправки
-            new_ideas = extract_ideas_from_plan(plan)
-            save_used_ideas(user_id, new_ideas)
+                new_ideas = extract_ideas_from_plan(plan)
+                save_used_ideas(user_id, new_ideas)
 
-            # безопасная отправка длинного текста
-            await send_long_message(update.effective_chat.id, plan, context)
+                await send_long_message(update.effective_chat.id, plan, context)
 
-        except Exception as e:
-            print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-            await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}-{block_end}.")
-            continue
+            except Exception as e:
+                print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
+                await update.message.reply_text(
+                    f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
+                )
+                continue  # <— работает, потому что мы внутри for
 
-    # финал планировщика
-    session["state"] = "menu_roles"
-    kb = [
-        [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
-        [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
-        [InlineKeyboardButton("🎬 Reels",       callback_data="role_reels")],
-    ]
-    await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
-    return
+        # финал планировщика
+        session["state"] = "menu_roles"
+        kb = [
+            [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
+            [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
+            [InlineKeyboardButton("🎬 Reels",       callback_data="role_reels")],
+        ]
+        await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
+        return
 
 
     # === Reels ===
