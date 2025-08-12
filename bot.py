@@ -745,19 +745,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         previous_context = ""
         all_results = []
-        used_ideas = ""
 
         try:
             for block_start in range(1, total_days + 1, 5):
                 block_end = min(block_start + 4, total_days)
-
-                # <<< ВСТАВЬ СЮДА (сразу после block_end) >>>
-                user_id = update.effective_user.id
-                prev_ideas = load_used_ideas(user_id)              # из БД
-                used_ideas = "; ".join(prev_ideas) or "—"
-
-                # соберём список сегментов ЦА, которые пользователь прислал
-                segments_str = "; ".join(session.get("audience_segments", [])) or "не задано"
 
                 prompt = f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
@@ -821,39 +812,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
 
+                await update.message.reply_text(
+                    f"⏳ Генерирую Дни {block_start}-{block_end}..."
+                )
+
                 try:
-                    await update.message.reply_text(
-                        f"⏳ Генерирую дни {block_start}-{block_end}..."
+                    response = openai.ChatCompletion.create(
+                        model="gpt-3.5-turbo",
+                        temperature=0.8,
+                        max_tokens=1500,
+                        messages=[{"role": "user", "content": prompt}],
                     )
 
-                    try:
-                        response = openai.ChatCompletion.create(
-                            model="gpt-3.5-turbo",
-                            temperature=0.8,
-                            max_tokens=1500,
-                            messages=[{"role": "user", "content": prompt}],
-                        )
+                    result = sanitize_ad_text(
+                        response["choices"][0]["message"]["content"]
+                    )
 
-                        result = sanitize_ad_text(response["choices"][0]["message"]["content"])
-                        new_ideas = extract_ideas_from_plan(result)
-                        save_used_ideas(update.effective_user.id, new_ideas)
+                    # Если у тебя НЕТ функций extract_ideas_from_plan/save_used_ideas — оставь строки ниже закомментированными.
+                    # new_ideas = extract_ideas_from_plan(result)
+                    # save_used_ideas(update.effective_user.id, new_ideas)
 
-                        previous_context += f"\n{result}"
-                        all_results.append(result)
-                        await send_long_message(update.effective_chat.id, result, context)
-
-                    except Exception as e:
-                        print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-                        await update.message.reply_text(
-                            f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
-                        )
+                    previous_context += f"\n{result}"
+                    all_results.append(result)
+                    await send_long_message(update.effective_chat.id, result, context)
 
                 except Exception as e:
-                    print("Planner Fatal Error:", e)
+                    print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
                     await update.message.reply_text(
-                        "❌ Ошибка при генерации плана. Попробуй ещё раз."
+                        f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
                     )
-                    
+
+        except Exception as e:
+            print("Planner Fatal Error:", e)
+            await update.message.reply_text(
+                "❌ Ошибка при генерации плана. Попробуй ещё раз."
+            )
+
+        session["state"] = "menu_roles"
+        kb = [[InlineKeyboardButton("🔄 Выбрать другого помощника", callback_data="roles_menu")]]
+        await update.message.reply_text(
+            "✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb)
+        )
+        return
 
     # === Reels ===
     if session.get("state") == "reels_topic":
