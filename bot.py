@@ -782,7 +782,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             block_end = min(block_start + (BLOCK_SIZE - 1), total_days)
 
             def make_prompt(bs, be):
-                return = f"""
+                return 
+                
+                prompt = f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
 жёстко опираясь на ввод пользователя.
 
