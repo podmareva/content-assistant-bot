@@ -718,7 +718,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Текст готов!", reply_markup=InlineKeyboardMarkup(kb))
             return
 
-        # === Планировщик ===
+    # === Планировщик ===
     if session.get("state") == "planner_days":
         session["planner_data"].append(text)
 
@@ -735,10 +735,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)..."
         )
 
-        # (опционально; если используешь где-то дальше)
-        previous_context = ""
-        all_results = []
-
         for block_start in range(1, total_days + 1, 5):
             block_end = min(block_start + 4, total_days)
             await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
@@ -749,7 +745,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             used_ideas = "; ".join(prev_ideas) or "—"
             segments_str = "; ".join(session.get("audience_segments", [])) or "—"
 
-            # ПРОМПТ (важно: {block_start}/{block_end}, никаких {bs}/{be})
+            # ПРОМПТ — ВАЖНО: здесь {block_start}/{block_end} и {used_ideas}
             prompt = f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
 жёстко опираясь на ввод пользователя.
@@ -822,7 +818,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             plan = response["choices"][0]["message"]["content"]
 
-            # сохраняем идеи (анти-повторы)
+            # сохраняем идеи (анти-повторы) — до отправки
             new_ideas = extract_ideas_from_plan(plan)
             save_used_ideas(user_id, new_ideas)
 
@@ -831,11 +827,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         except Exception as e:
             print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
-            await update.message.reply_text(
-                f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
-            )
+            await update.message.reply_text(f"⚠️ Ошибка генерации для дней {block_start}-{block_end}.")
             continue
-            
+
     # финал планировщика
     session["state"] = "menu_roles"
     kb = [
@@ -845,6 +839,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
     return
+
 
     # === Reels ===
     if session.get("state") == "reels_topic":
