@@ -1175,9 +1175,9 @@ if __name__ == "__main__":
 
     # handlers...
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("planner",    cmd_planner))
-    app.add_handler(CommandHandler("copywriter", cmd_copywriter))
-    app.add_handler(CommandHandler("producer",   cmd_producer))
+    app.add_handler(CommandHandler("planner",    role_planner))
+    app.add_handler(CommandHandler("copywriter", role_copywriter))
+    app.add_handler(CommandHandler("producer",   role_producer))
 
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
