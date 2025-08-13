@@ -850,17 +850,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         full_plan_parts = []
-        for block_start in range(1, total_days + 1, 5):
-            block_end = min(block_start + 4, total_days)
+        for block_start in range(1, total_days + 1, 3):
+            block_end = min(block_start + 2, total_days)
             await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
+            # анти-повторы + сегменты ЦА
             user_id = update.effective_user.id
-            prev_ideas = load_used_ideas(user_id)
-            used_ideas = "; ".join(prev_ideas) or "—"
+            prev_ideas   = load_used_ideas(user_id)
+            used_ideas   = "; ".join(prev_ideas) or "—"
             segments_str = "; ".join(session.get("audience_segments", [])) or "—"
 
-            # ПРОМПТ... (здесь твой длинный промпт, я его не менял)
-            # ВАЖНО: ВНУТРИ ПРОМПТА ЕСТЬ ДРУГАЯ ОШИБКА, СМ. ПУНКТ 2
             prompt =f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
 жёстко опираясь на ввод пользователя.
@@ -916,32 +915,80 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
 
-            try:
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    temperature=0.8,
-                    max_tokens=3000,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                plan = response["choices"][0]["message"]["content"]
-                new_ideas = extract_ideas_from_plan(plan)
-                save_used_ideas(user_id, new_ideas)
-                await send_long_message(update.effective_chat.id, plan, context)
+            import time
+            model = os.getenv("OPENAI_MODEL", "gpt-5-mini")  # или "gpt-3.5-turbo", как решишь
+            tries, last_err = 0, None
 
-            except Exception as e:
-                print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
+            while tries < 3:
+                tries += 1
+                try:
+                    response = openai.ChatCompletion.create(
+                        model=model,
+                        temperature=0.8,
+                        max_tokens=2200,   # запас для 3 дней
+                        messages=[{"role": "user", "content": prompt}],
+                        timeout=40,
+                    )
+                    plan = response["choices"][0]["message"]["content"]
+
+                    # --- добираем недостающие дни (если модель отдала не все) ---
+                    missing = missing_days(plan, block_start, block_end)  # функция у нас уже есть
+                    fill_tries = 0
+                    while missing and fill_tries < 2:
+                        fill_tries += 1
+                        cont_from = missing[0]
+                        cont_prompt = (
+                            f"Продолжи план в том же формате. Выдай строго дни {cont_from}–{block_end} без повторов.\n\n"
+                            f"Вот что уже сгенерировано:\n{plan}"
+                        )
+                        cont_resp = openai.ChatCompletion.create(
+                            model=model,
+                            temperature=0.8,
+                            max_tokens=1800,
+                            messages=[{"role": "user", "content": cont_prompt}],
+                            timeout=40,
+                        )
+                        plan += "\n\n" + cont_resp["choices"][0]["message"]["content"]
+                        missing = missing_days(plan, block_start, block_end)
+                    # --------------------------------------------------------------
+
+                    # сохраняем идеи (без падения, если парсер споткнулся)
+                    try:
+                        new_ideas = extract_ideas_from_plan(plan)
+                        save_used_ideas(user_id, new_ideas)
+                    except Exception as e:
+                        print("Save ideas error:", e)
+
+                    await send_long_message(update.effective_chat.id, plan, context)
+                    break  # успех — выходим из while
+
+                except Exception as e:
+                    import traceback
+                    last_err = e
+                    print("\n=== Planner error ===")
+                    print(f"Block {block_start}-{block_end}, try {tries}/3")
+                    print(type(e).__name__, e)
+                    traceback.print_exc()
+
+                    # на второй попытке попробуем запасную модель
+                    if tries == 2:
+                        model = "gpt-4.1"
+                    time.sleep(1.0)
+                    continue
+
+            # если три попытки провалились — идём дальше, чтобы не стопорить весь план
+            if last_err and tries >= 3:
                 await update.message.reply_text(
-                    f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
+                    f"⚠️ Ошибка генерации для дней {block_start}-{block_end}. Перехожу к следующему блоку…"
                 )
                 continue
 
-        # ЭТОТ БЛОК КОДА ДОЛЖЕН БЫТЬ НА ТОМ ЖЕ УРОВНЕ, ЧТО И 'for' ВЫШЕ
-        # ВЕРОЯТНО, ОШИБКА В ОТСТУПАХ ИМЕННО ЗДЕСЬ
+        # --- финал планировщика (оставь как у тебя было) ---
         session["state"] = "menu_roles"
         kb = [
             [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
-            [InlineKeyboardButton("✍️ Копирайтер", callback_data="role_copywriter")],
-            [InlineKeyboardButton("🎬 Reels",       callback_data="role_reels")],
+            [InlineKeyboardButton("✍️ Копирайтер",  callback_data="role_copywriter")],
+            [InlineKeyboardButton("🎬 Reels",        callback_data="role_reels")],
         ]
         await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
         return
