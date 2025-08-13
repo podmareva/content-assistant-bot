@@ -861,7 +861,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         await update.message.reply_text(
-            f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)..."
+            f"📅 Формирую уникальный контент-план на {total_days} дней (по 3 дня за раз)..."
         )
 
         full_plan_parts = []
@@ -870,12 +870,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
             # анти-повторы + сегменты ЦА
-            user_id = update.effective_user.id
+            user_id      = update.effective_user.id
             prev_ideas   = load_used_ideas(user_id)
             used_ideas   = "; ".join(prev_ideas) or "—"
             segments_str = "; ".join(session.get("audience_segments", [])) or "—"
 
-            prompt =f"""
+            # ТВОЙ ПРОМПТ (важно: {block_start}/{block_end}/{used_ideas})
+            prompt = f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
 жёстко опираясь на ввод пользователя.
 
@@ -930,73 +931,88 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
 """
 
-            import time
-            model = os.getenv("OPENAI_MODEL", "gpt-5-mini")  # или "gpt-3.5-turbo", как решишь
-            tries, last_err = 0, None
+            model = os.getenv("OPENAI_MODEL", "gpt-5-mini")  # или "gpt-3.5-turbo"
+            plan_full = ""        # сюда накапливаем блок
+            success   = False     # флаг, что блок собран (полностью или частично)
+            tries     = 0
 
             while tries < 3:
                 tries += 1
                 try:
-                    response = openai.ChatCompletion.create(
-                        model=model,
-                        temperature=0.8,
-                        max_tokens=2200,   # запас для 3 дней
+                    resp = openai.ChatCompletion.create(
+                        model=model, temperature=0.8, max_tokens=2200,
                         messages=[{"role": "user", "content": prompt}],
                         timeout=40,
                     )
-                    plan = response["choices"][0]["message"]["content"]
+                    plan_full = resp["choices"][0]["message"]["content"]
 
-                    # --- добираем недостающие дни (если модель отдала не все) ---
-                    missing = missing_days(plan, block_start, block_end)  # функция у нас уже есть
+                    # --- дозапрос недостающих дней: сначала "продолжением" ---
+                    miss = missing_days(plan_full, block_start, block_end)
                     fill_tries = 0
-                    while missing and fill_tries < 2:
+                    while miss and fill_tries < 2:
                         fill_tries += 1
-                        cont_from = missing[0]
+                        cont_from = miss[0]
                         cont_prompt = (
-                            f"Продолжи план в том же формате. Выдай строго дни {cont_from}–{block_end} без повторов.\n\n"
-                            f"Вот что уже сгенерировано:\n{plan}"
+                            f"Продолжи план в том же стиле. Выдай строго дни {cont_from}–{block_end} без повторов.\n\n"
+                            f"Вот что уже сгенерировано:\n{plan_full}"
                         )
-                        cont_resp = openai.ChatCompletion.create(
-                            model=model,
-                            temperature=0.8,
-                            max_tokens=1800,
+                        cont = openai.ChatCompletion.create(
+                            model=model, temperature=0.8, max_tokens=1800,
                             messages=[{"role": "user", "content": cont_prompt}],
                             timeout=40,
-                        )
-                        plan += "\n\n" + cont_resp["choices"][0]["message"]["content"]
-                        missing = missing_days(plan, block_start, block_end)
-                    # --------------------------------------------------------------
+                        )["choices"][0]["message"]["content"]
+                        plan_full += "\n\n" + cont
+                        miss = missing_days(plan_full, block_start, block_end)
 
-                    # сохраняем идеи (без падения, если парсер споткнулся)
+                    # --- если всё ещё не хватает — дособираем по одному дню ---
+                    single_tries = 0
+                    miss = missing_days(plan_full, block_start, block_end)
+                    while miss and single_tries < 3:
+                        single_tries += 1
+                        d = miss[0]
+                        day_prompt = (
+                            f"Сгенерируй ТОЛЬКО 'День {d}:' по тем же правилам и формате, что и выше. "
+                            f"Не повторяй предыдущие дни. Дай ровно один день и начни строкой 'День {d}:'.\n\n"
+                            f"Контекст (прошлые дни):\n{plan_full}"
+                        )
+                        day = openai.ChatCompletion.create(
+                            model=model, temperature=0.8, max_tokens=900,
+                            messages=[{"role": "user", "content": day_prompt}],
+                            timeout=40,
+                        )["choices"][0]["message"]["content"]
+                        plan_full += "\n\n" + day
+                        miss = missing_days(plan_full, block_start, block_end)
+
+                    # ---- ГОТОВО: сохраняем идеи и отправляем, даже если есть пропуски ----
                     try:
-                        new_ideas = extract_ideas_from_plan(plan)
+                        new_ideas = extract_ideas_from_plan(plan_full)
                         save_used_ideas(user_id, new_ideas)
                     except Exception as e:
                         print("Save ideas error:", e)
 
-                    await send_long_message(update.effective_chat.id, plan, context)
-                    break  # успех — выходим из while
+                    await send_long_message(update.effective_chat.id, plan_full, context)
+
+                    # если остались недостающие дни — сообщим мягко, без «ошибки для блока»
+                    miss = missing_days(plan_full, block_start, block_end)
+                    if miss:
+                        await update.message.reply_text(
+                            f"ℹ️ Не удалось добрать дни: {', '.join(map(str, miss))}. Иду дальше…"
+                        )
+                    success = True
+                    break  # выходим из while tries
 
                 except Exception as e:
-                    import traceback
-                    last_err = e
-                    print("\n=== Planner error ===")
-                    print(f"Block {block_start}-{block_end}, try {tries}/3")
-                    print(type(e).__name__, e)
-                    traceback.print_exc()
-
-                    # на второй попытке попробуем запасную модель
+                    print("\n=== Planner error (block", block_start, "-", block_end, ") try", tries, "===\n", e)
                     if tries == 2:
-                        model = "gpt-4.1"
+                        model = "gpt-4.1"   # фолбэк на вторую попытку
                     time.sleep(1.0)
                     continue
 
-            # если три попытки провалились — идём дальше, чтобы не стопорить весь план
-            if last_err and tries >= 3:
+            # если вообще ничего не сгенерировали — только тогда общий варнинг
+            if not success:
                 await update.message.reply_text(
-                    f"⚠️ Ошибка генерации для дней {block_start}-{block_end}. Перехожу к следующему блоку…"
+                    f"⚠️ Не удалось сгенерировать дни {block_start}-{block_end}. Перехожу к следующему блоку…"
                 )
-                continue
 
         # --- финал планировщика (оставь как у тебя было) ---
         session["state"] = "menu_roles"
