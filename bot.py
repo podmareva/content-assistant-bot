@@ -13,33 +13,6 @@ import re
 
 MAX_TG = 4096
 
-async def send_long_text(chat_id: int, text: str, context, parse_mode=None):
-    """
-    Делит длинный текст на части и отправляет по очереди,
-    чтобы Telegram ничего не обрезал.
-    Режем по пустым строкам и заголовкам "День N:".
-    """
-    parts = []
-    buf = ""
-
-    tokens = re.split(r'(?=День\s+\d+:)|\n{2,}', text or "")
-
-    for t in tokens:
-        if not t:
-            continue
-        if len(buf) + len(t) + 1 > MAX_TG - 50:
-            if buf.strip():
-                parts.append(buf.strip())
-            buf = t
-        else:
-            buf += ("\n\n" if buf else "") + t
-
-    if buf.strip():
-        parts.append(buf.strip())
-
-    for chunk in parts:
-        await context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode)
-
 import time
 
 def openai_chat(messages, *, max_tokens=1600, temperature=0.8, attempts=3):
@@ -862,7 +835,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 response = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
                     temperature=0.8,
-                    max_tokens=1500,
+                    max_tokens=3000,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 plan = response["choices"][0]["message"]["content"]
