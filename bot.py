@@ -71,10 +71,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL не задан. Укажи его в .env или переменных окружения.")
 
-# === Приложение PTB 21 ===
-app = Application.builder().token(BOT_TOKEN).build()
-ensure_schema()
-
 # === Сессии в памяти (для диалога) ===
 sessions: dict[int, dict] = {}
 
@@ -226,20 +222,21 @@ def extract_ideas_from_plan(text: str) -> list[str]:
 def save_used_ideas(user_id: int, ideas: list[str]) -> None:
     if not ideas:
         return
+    conn = db_connect()
     with conn.cursor() as c:
         c.executemany(
-            "INSERT INTO used_ideas(user_id, idea) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-            [(user_id, i) for i in ideas]
+            "INSERT INTO used_ideas(user_id, idea) VALUES (%s, %s)",
+            [(user_id, i) for i in ideas if i and i.strip()]
         )
 
 def load_used_ideas(user_id: int, limit: int = 400) -> list[str]:
+    conn = db_connect()
     with conn.cursor() as c:
         c.execute(
             "SELECT idea FROM used_ideas WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
             (user_id, limit),
         )
         rows = c.fetchall()
-    # conn создан с row_factory=dict_row, поэтому rows — это список словарей
     return [r["idea"] for r in rows]
 
 
@@ -270,17 +267,18 @@ async def gentoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Некорректный user_id.")
         return
 
-    # Гарантируем уникальность токена
     token = secrets.token_hex(4)
-    cur.execute(
-        "INSERT INTO tokens(token, bot_name, user_id) VALUES(%s, %s, %s) ON CONFLICT DO NOTHING",
-        (token, BOT_NAME, target_id),
-    )
-    # Если внезапно конфликт, можно перегенерить; для простоты считаем, что ок
+
+    conn = db_connect()
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO tokens(token, bot_name, user_id) VALUES(%s, %s, %s) ON CONFLICT DO NOTHING",
+            (token, BOT_NAME, target_id),
+        )
+
     await update.message.reply_text(
         f"✅ Токен для {target_id}: {token}\nhttps://t.me/{BOT_NAME}?start={token}"
     )
-
 
 def validate_token(token: str, user_id: int) -> bool:
     conn = db_connect()
