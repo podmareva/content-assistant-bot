@@ -146,16 +146,27 @@ async def send_long_message(chat_id: int, text: str, context: ContextTypes.DEFAU
 
 def normalize_platform(text: str) -> str | None:
     t = (text or "").strip().lower()
-    if any(x in t for x in ["insta", "инста", "инстаграм", "инстаграмм", "ig"]):
+
+    # instagram
+    if any(x in t for x in ["insta", "inst", "ig", "инста", "инст", "инстаграм", "инстаграмм"]):
         return "instagram"
-    if any(x in t for x in ["tg", "тг", "telegram", "телеграм"]):
+
+    # telegram
+    if any(x in t for x in ["tg", "тг", "telegram", "телеграм", "телеграмм"]):
         return "telegram"
-    if any(x in t for x in ["youtube", "ютуб"]):
+
+    # youtube
+    if any(x in t for x in ["youtube", "ютуб", "ютюб", "yt"]):
         return "youtube"
-    if any(x in t for x in ["vk", "вк", "вконтакте"]):
+
+    # vk
+    if any(x in t for x in ["vk", "вк", "вконтакте", "в контакте"]):
         return "vk"
-    if any(x in t for x in ["tiktok", "тик ток", "тикток"]):
+
+    # tiktok
+    if any(x in t for x in ["tiktok", "тик ток", "тик-ток", "тикток", "tt"]):
         return "tiktok"
+
     return None
 
 import re
@@ -1155,7 +1166,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await send_main_menu(update, "🤔 Не понял команду. Выбери действие или используй слэш-команду:")
-    return
 
 
 # === Запуск бота ===
@@ -1165,11 +1175,13 @@ if __name__ == "__main__":
 
     # handlers...
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("planner",    role_planner))
-    app.add_handler(CommandHandler("copywriter", role_copywriter))
-    app.add_handler(CommandHandler("producer",   role_producer))
+    app.add_handler(CommandHandler("planner",    cmd_planner))
+    app.add_handler(CommandHandler("copywriter", cmd_copywriter))
+    app.add_handler(CommandHandler("producer",   cmd_producer))
+
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
     
 
     print("🚀 Бот запущен! Ждём пользователей...")
