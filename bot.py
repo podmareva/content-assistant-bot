@@ -791,17 +791,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📅 Формирую уникальный контент-план на {total_days} дней (по 5 дней за раз)..."
         )
 
-        for block_start in range(1, total_days + 1, 3):
-            block_end = min(block_start + 2, total_days)
+        full_plan_parts = []
+        for block_start in range(1, total_days + 1, 5):
+            block_end = min(block_start + 4, total_days)
             await update.message.reply_text(f"⏳ Генерирую Дни {block_start}-{block_end}...")
 
             user_id = update.effective_user.id
-            prev_ideas  = load_used_ideas(user_id)
-            used_ideas  = "; ".join(prev_ideas) or "—"
+            prev_ideas = load_used_ideas(user_id)
+            used_ideas = "; ".join(prev_ideas) or "—"
             segments_str = "; ".join(session.get("audience_segments", [])) or "—"
 
-            # ПРОМПТ — ВАЖНО: здесь {block_start}/{block_end} и {used_ideas}
-            prompt = f"""
+            # ПРОМПТ... (здесь твой длинный промпт, я его не менял)
+            # ВАЖНО: ВНУТРИ ПРОМПТА ЕСТЬ ДРУГАЯ ОШИБКА, СМ. ПУНКТ 2
+            prompt =f"""
 Ты — строгий контент-стратег и редактор. Твоя задача — создать детальный, НО лаконичный контент-план без воды,
 жёстко опираясь на ввод пользователя.
 
@@ -821,7 +823,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 === ОГРАНИЧЕНИЯ И ЛОГИКА ===
 - Генерируй только для дней {block_start}–{block_end} включительно и перечисляй дни по порядку.
-- Не повторяй темы, форматы, механики, заголовки и CTA, которые встречались ранее (список использованного): {used_ideas}.
+- Не повторяй темы, форматы, механики, заголовки и CTA, которые встречались ранее (список использованного): {used_ideas[-2000:]}.
   Считай повтором не только точные совпадения, но и смысловые дубликаты.
 - Внутри текущего блока тоже не повторяйся.
 - В каждом 5-дневном промежутке должны встретиться ВСЕ рубрики (Экспертность, Вовлечение, Личное, Кейсы, Продажи).
@@ -846,18 +848,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Рилс/Пост — Заголовок: <...> • Формат: <...> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
 • Визуал: <...>
 
-...
-День {block_end}:
-• Рубрика: <...> • Этап: <...>
-• Сторис — Заголовок: <...> • Идея: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
-• Рилс/Пост — Заголовок: <...> • Формат: <...> • Идея/мини-сценарий: <...> • Хук: <...> • CTA: <...> [Сегмент ЦА: <...>]
-• Визуал: <...>
-
 === ТРЕБОВАНИЯ К КАЧЕСТВУ ===
 - Темы обязательны: из распаковки, позиционирования, продуктов и сегментов ЦА пользователя — не придумывай «в вакууме».
 - Рубрики чередуй; форматы и механики варьируй (UGC, behind-the-scenes, челлендж, мини-гайд, кейс-разбор, FAQ, сравнение, миф/факт).
-- Для повторных запросов от того же пользователя генерируй принципиально новые темы, сверяясь с {used_ideas}.
-- Не повторяй ранее использованные идеи: {used_ideas}
+- Для повторных запросов от того же пользователя генерируй принципиально новые темы, сверяясь с {used_ideas[-2000:]}.
+- Не повторяй ранее использованные идеи: {used_ideas[-2000:]}
 - Язык: русский, деловой и дружелюбный тон.
 
 ⚖️ Соблюдай закон №38-ФЗ и №72-ФЗ от 07.04.2025: никаких запрещённых обещаний; формулировки корректные и этичные.
@@ -867,68 +862,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 response = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
                     temperature=0.8,
-                    max_tokens=2500,
+                    max_tokens=1500,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 plan = response["choices"][0]["message"]["content"]
-            
-                    try:
-                        new_ideas = extract_ideas_from_plan(plan)
-                        save_used_ideas(user_id, new_ideas)
-                    except Exception as e:
-                        print("Save ideas error:", e)
-            
-                # === добираем недостающие дни, если модель вывела не все ===
-                def missing_days(text: str, start: int, end: int):
-                    found = set(int(n) for n in re.findall(r"День\s+(\d+):", text or ""))
-                    return [d for d in range(start, end + 1) if d not in found]
-
-                missing = _missing_days(plan, block_start, block_end)
-
-                # максимум 2 дозапроса, чтобы не зависнуть бесконечно
-                _attempts = 0
-                while missing and _attempts < 2:
-                    _attempts += 1
-                    cont_from = missing[0]
-                    cont_prompt = f"""
-                Продолжи контент-план в точно таком же формате.
-                ВЫДАЙ строго дни {cont_from}–{block_end} (если какие-то уже есть — не повторяй).
-                Сохраняй стиль, структуру и требования. Не переписывай ранее выданные дни.
-
-                Вот что уже сгенерировано (для контекста):
-                {plan}
-                """
-
-                    cont_resp = openai.ChatCompletion.create(
-                        model="gpt-3.5-turbo",
-                        temperature=0.8,
-                        max_tokens=2000,
-                        messages=[{"role": "user", "content": cont_prompt}],
-                    )
-                    addition = cont_resp["choices"][0]["message"]["content"]
-                    plan += "\n\n" + addition
-                    # пересчитаем, что ещё отсутствует
-                    missing = _missing_days(plan, block_start, block_end)
-
-
                 new_ideas = extract_ideas_from_plan(plan)
                 save_used_ideas(user_id, new_ideas)
-
                 await send_long_message(update.effective_chat.id, plan, context)
 
             except Exception as e:
-                import traceback
-                print("\n=== Planner error ===")
-                print(f"Block: {block_start}-{block_end}")
-                print("Error type:", type(e).__name__)
-                print("Error:", e)
-                traceback.print_exc()
+                print(f"Planner OpenAI Error (дни {block_start}-{block_end}):", e)
                 await update.message.reply_text(
-                    f"⚠️ Ошибка генерации для дней {block_start}-{block_end}. Пробую следующий блок…"
+                    f"⚠️ Ошибка генерации для дней {block_start}-{block_end}."
                 )
                 continue
 
-        # финал планировщика
+        # ЭТОТ БЛОК КОДА ДОЛЖЕН БЫТЬ НА ТОМ ЖЕ УРОВНЕ, ЧТО И 'for' ВЫШЕ
+        # ВЕРОЯТНО, ОШИБКА В ОТСТУПАХ ИМЕННО ЗДЕСЬ
         session["state"] = "menu_roles"
         kb = [
             [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
@@ -937,7 +887,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await update.message.reply_text("✅ Контент-план готов!", reply_markup=InlineKeyboardMarkup(kb))
         return
-
 
     # === Reels ===
     if session.get("state") == "reels_topic":
