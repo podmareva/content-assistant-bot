@@ -71,9 +71,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL не задан. Укажи его в .env или переменных окружения.")
 
-# === Подключение к PostgreSQL (psycopg v3) ===
-conn = psycopg.connect(DATABASE_URL, sslmode="require", autocommit=True, row_factory=dict_row)
-cur = conn.cursor()
 # Храним ранее сгенерированные идеи/заголовки
 cur.execute("""
 CREATE TABLE IF NOT EXISTS used_ideas (
@@ -86,6 +83,7 @@ CREATE TABLE IF NOT EXISTS used_ideas (
 
 # === Приложение PTB 21 ===
 app = Application.builder().token(BOT_TOKEN).build()
+ensure_schema()
 
 # === Схема БД (PostgreSQL) ===
 cur.execute(
@@ -536,6 +534,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["reels_data"] = []
         await query.edit_message_text("🎬 Укажи тему и цель ролика.")
 
+# === DB helpers (psycopg v3) ===
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+_conn: psycopg.Connection | None = None
+
+def db_connect() -> psycopg.Connection:
+    """Singleton-подключение с keepalive, autocommit и dict_row."""
+    global _conn
+    if _conn is not None and not _conn.closed:
+        return _conn
+    _conn = psycopg.connect(
+        DATABASE_URL,
+        sslmode="require",
+        autocommit=True,
+        row_factory=dict_row,
+        keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5,
+    )
+    return _conn
+
+def ensure_schema() -> None:
+    """Создаём таблицу used_ideas один раз при старте."""
+    conn = db_connect()
+    with conn.cursor() as cur:
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS used_ideas (
+            user_id    bigint      NOT NULL,
+            idea       text        NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT now()
+        );
+        """)
 
 # === ЕДИНЫЙ обработчик текстовых сообщений ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
