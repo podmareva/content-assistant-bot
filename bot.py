@@ -71,45 +71,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL не задан. Укажи его в .env или переменных окружения.")
 
-# Храним ранее сгенерированные идеи/заголовки
-cur.execute("""
-CREATE TABLE IF NOT EXISTS used_ideas (
-  user_id   BIGINT      NOT NULL,
-  idea      TEXT        NOT NULL,
-  created_at TIMESTAMP  NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, idea)
-)
-""")
-
 # === Приложение PTB 21 ===
 app = Application.builder().token(BOT_TOKEN).build()
 ensure_schema()
-
-# === Схема БД (PostgreSQL) ===
-cur.execute(
-    """
-    CREATE TABLE IF NOT EXISTS allowed_users (
-        user_id BIGINT NOT NULL,
-        bot_name TEXT NOT NULL,
-        PRIMARY KEY (user_id, bot_name)
-    );
-    """
-)
-cur.execute(
-    """
-    CREATE TABLE IF NOT EXISTS tokens (
-        token TEXT PRIMARY KEY,
-        bot_name TEXT NOT NULL,
-        user_id BIGINT NOT NULL
-    );
-    """
-)
-# Админа добавим, если указан
-if ADMIN_ID:
-    cur.execute(
-        "INSERT INTO allowed_users(user_id, bot_name) VALUES(%s, %s) ON CONFLICT DO NOTHING",
-        (ADMIN_ID, BOT_NAME),
-    )
 
 # === Сессии в памяти (для диалога) ===
 sessions: dict[int, dict] = {}
@@ -198,6 +162,39 @@ def normalize_platform(text: str) -> str | None:
         return "tiktok"
     return None
 
+# === Меню ролей (кнопки + слэш-команды) ===
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update
+from telegram.ext import ContextTypes
+
+async def send_main_menu(update: Update, text: str = "Выбери действие:"):
+    kb = [
+        [InlineKeyboardButton("📅 Планировщик", callback_data="role_planner")],
+        [InlineKeyboardButton("✍️ Копирайтер",  callback_data="role_copywriter")],
+        [InlineKeyboardButton("🎬 Продюсер (Reels)", callback_data="role_reels")],
+    ]
+    hint = "\n\nКоманды: /planner • /copywriter • /producer • /start"
+    if update.message:  # обычное сообщение
+        await update.message.reply_text(text + hint, reply_markup=InlineKeyboardMarkup(kb))
+    else:               # ответ на callback
+        await update.callback_query.message.reply_text(text + hint, reply_markup=InlineKeyboardMarkup(kb))
+
+# === Слэш-команды, не стирающие данные ===
+async def role_planner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    s = get_user_session(update)
+    s.setdefault("planner_data", []); s["planner_data"].clear()  # очищаем только шаги планировщика
+    s["state"] = "planner_goal"
+    await update.message.reply_text("🎯 Укажи главную цель контент-плана (привлечение/прогрев/продажи и т.д.).")
+
+async def role_copywriter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    s = get_user_session(update)
+    s["state"] = "copywriter_topic"   # поставь имя первого шага копирайтера в твоём коде
+    await update.message.reply_text("✍️ О чём пост? Напиши тему/тезисы.")
+
+async def role_producer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    s = get_user_session(update)
+    s["state"] = "reels_topic"        # поставь имя первого шага продюсера/Reels в твоём коде
+    await update.message.reply_text("🎬 Какой ролик нужен? Опиши цель/формат.")
+
 # === Анти-повторы идей (извлечь / сохранить / загрузить) ===
 import re  # если уже импортирован выше — повторять не надо
 
@@ -249,11 +246,13 @@ def load_used_ideas(user_id: int, limit: int = 400) -> list[str]:
 def is_allowed(user_id: int) -> bool:
     if user_id == ADMIN_ID:
         return True
-    cur.execute(
-        "SELECT 1 FROM allowed_users WHERE user_id=%s AND bot_name=%s LIMIT 1",
-        (user_id, BOT_NAME),
-    )
-    return cur.fetchone() is not None
+    conn = db_connect()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM allowed_users WHERE user_id=%s AND bot_name=%s LIMIT 1",
+            (user_id, BOT_NAME),
+        )
+        return cur.fetchone() is not None
 
 
 # === Генерация токена (для главного бота/админа) ===
@@ -284,19 +283,24 @@ async def gentoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def validate_token(token: str, user_id: int) -> bool:
-    cur.execute(
-        "SELECT user_id FROM tokens WHERE token=%s AND bot_name=%s",
-        (token, BOT_NAME),
-    )
-    row = cur.fetchone()
-    if row and row["user_id"] == user_id:
-        # Разрешаем доступ пользователю и удаляем токен (одноразовый)
+    conn = db_connect()
+    with conn.cursor() as cur:
+        # Проверяем, есть ли такой токен для нашего бота
         cur.execute(
-            "INSERT INTO allowed_users(user_id, bot_name) VALUES(%s, %s) ON CONFLICT DO NOTHING",
-            (user_id, BOT_NAME),
+            "SELECT user_id FROM tokens WHERE token=%s AND bot_name=%s",
+            (token, BOT_NAME),
         )
-        cur.execute("DELETE FROM tokens WHERE token=%s", (token,))
-        return True
+        row = cur.fetchone()
+
+        if row and row["user_id"] == user_id:
+            # Разрешаем доступ и удаляем одноразовый токен
+            cur.execute(
+                "INSERT INTO allowed_users (user_id, bot_name) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (user_id, BOT_NAME),
+            )
+            cur.execute("DELETE FROM tokens WHERE token=%s", (token,))
+            return True
+
     return False
 
 
@@ -554,9 +558,10 @@ def db_connect() -> psycopg.Connection:
     return _conn
 
 def ensure_schema() -> None:
-    """Создаём таблицу used_ideas один раз при старте."""
+    """Создаём нужные таблицы и добавляем админа (если указан) — одним вызовом при старте."""
     conn = db_connect()
     with conn.cursor() as cur:
+        # 1) Таблица для анти-повторов
         cur.execute("""
         CREATE TABLE IF NOT EXISTS used_ideas (
             user_id    bigint      NOT NULL,
@@ -564,6 +569,33 @@ def ensure_schema() -> None:
             created_at timestamptz NOT NULL DEFAULT now()
         );
         """)
+
+        # 2) Разрешённые пользователи (если используешь)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS allowed_users (
+            user_id  bigint NOT NULL,
+            bot_name text   NOT NULL,
+            PRIMARY KEY (user_id, bot_name)
+        );
+        """)
+
+        # 3) Таблица токенов (если используешь в боте)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS tokens (
+            token    text   PRIMARY KEY,
+            bot_name text   NOT NULL,
+            user_id  bigint NOT NULL
+        );
+        """)
+
+        # 4) Добавляем админа в allowed_users, если указан
+        if ADMIN_ID:
+            cur.execute(
+                "INSERT INTO allowed_users (user_id, bot_name) "
+                "VALUES (%s, %s) ON CONFLICT DO NOTHING;",
+                (ADMIN_ID, BOT_NAME),
+            )
+
 
 # === ЕДИНЫЙ обработчик текстовых сообщений ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1008,15 +1040,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # игнорируем лишние сообщения во время сценариев
         return
 
-    await update.message.reply_text("🤔 Не понял команду. Нажми /start для начала.")
+    await send_main_menu(update, "🤔 Не понял команду. Выбери действие или используй слэш-команду:")
 
 
 # === Запуск бота ===
 if __name__ == "__main__":
+    app = Application.builder().token(BOT_TOKEN).build()
+    ensure_schema()  # ← один раз при запуске
+
+    # handlers...
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("gentoken", gentoken))
+    app.add_handler(CommandHandler("planner",    role_planner))
+    app.add_handler(CommandHandler("copywriter", role_copywriter))
+    app.add_handler(CommandHandler("producer",   role_producer))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
 
     print("🚀 Бот запущен! Ждём пользователей...")
     app.run_polling()
