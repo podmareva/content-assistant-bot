@@ -219,6 +219,21 @@ def extract_ideas_from_plan(text: str) -> list[str]:
             uniq.append(i)
     return uniq
 
+def missing_days(text: str, start: int, end: int) -> list[int]:
+    """
+    Возвращает список дней в диапазоне [start, end], которых нет в тексте плана.
+    Ищем заголовки вида 'День N:'.
+    """
+    present = set()
+    for m in re.finditer(r"День\s+(\d+)\s*:", text or ""):
+        try:
+            n = int(m.group(1))
+        except Exception:
+            continue
+        present.add(n)
+
+    return [d for d in range(start, end + 1) if d not in present]
+
 def save_used_ideas(user_id: int, ideas: list[str]) -> None:
     if not ideas:
         return
