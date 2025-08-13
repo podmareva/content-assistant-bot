@@ -158,6 +158,30 @@ def normalize_platform(text: str) -> str | None:
         return "tiktok"
     return None
 
+import re
+
+def normalize_goal(text: str) -> str | None:
+    """
+    Возвращает одну из: 'привлечение' | 'прогрев' | 'продажи'
+    или None, если не распознали.
+    Принимает вариации и «лишние» символы.
+    """
+    t = (text or "").lower().strip()
+    t = re.sub(r"[^\w\s-]+", "", t)  # убираем !,. и т.п.
+
+    synonyms = {
+        "привлечение": ["привлечение", "привлечь", "охват", "рост", "подписки", "лиды", "лидогенерация", "leadgen"],
+        "прогрев": ["прогрев", "прогреть", "вовлечение", "доверие", "подогрев"],
+        "продажи": ["продажи", "продать", "заказы", "клиенты", "заявки", "конверсии", "монетизация"],
+    }
+    for key, words in synonyms.items():
+        if t == key:
+            return key
+        for w in words:
+            if w in t:
+                return key
+    return None
+
 # === Меню ролей (кнопки + слэш-команды) ===
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update
 from telegram.ext import ContextTypes
@@ -619,6 +643,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     session = get_user_session(update)
     text = update.message.text
+    t = (text or "").strip()
+    if t.isdigit() and session.get("expect") == "planner_days":
+        session["state"] = "planner_days"
 
     # === Сбор основной информации (пошагово) ===
     if session.get("state") == "collecting_base_info":
@@ -808,17 +835,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === Планировщик ===
     # цель → платформа
     if session.get("state") == "planner_goal":
-        goal = (text or "").strip()
-        if not goal:
-            await update.message.reply_text("🎯 Укажи цель (привлечение, прогрев, продажи и т.д.).")
-            return
-        session["planner_data"] = [goal]          # [goal]
-        session["state"] = "planner_platform"
+        goal_norm = normalize_goal(text)
+        if not goal_norm:
+            await update.message.reply_text(
+                "🎯 Укажи цель: привлечение / прогрев / продажи (можно своими словами: «подписки», «заявки», «вовлечение» и т.д.)."
+            )
+            return  # ← обязательно выходим, чтобы не свалиться в меню
+
+        # сохраняем только нормализованную цель
+        session["planner_data"] = [goal_norm]
+        set_state(session, "planner_platform")  # если нет set_state, то session["state"] = "planner_platform"
         await update.message.reply_text(
-            "📌 На какой платформе нужен план? (Instagram / Telegram / YouTube / VK / TikTok)\n"
+            "📌 На какой платформе план? (Instagram / Telegram / YouTube / VK / TikTok)\n"
             "Можно писать «инстаграмм», «инста», «тг», «ютуб»."
         )
-        return
+        return  # ← обязательно
 
     # платформа → частота
     if session.get("state") == "planner_platform":
@@ -845,6 +876,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if session.get("state") == "planner_face":
         session["planner_data"].append(text.strip())  # [goal, platform, freq, face]
         session["state"] = "planner_days"
+        set_state(session, "planner_days")  # или session["state"] = session["expect"] = "planner_days"
         await update.message.reply_text("📅 На какой срок нужен план (7 / 14 / 21 / 30 дней)? Напиши числом.")
         return
 
@@ -1117,6 +1149,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await send_main_menu(update, "🤔 Не понял команду. Выбери действие или используй слэш-команду:")
+    return
 
 
 # === Запуск бота ===
