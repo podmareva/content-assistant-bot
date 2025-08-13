@@ -182,6 +182,11 @@ def normalize_goal(text: str) -> str | None:
                 return key
     return None
 
+def set_state(session: dict, state: str) -> None:
+    """Фиксируем текущее состояние и запоминаем, что этого шага ждём."""
+    session["state"] = "planner_platform"
+    session["expect"] = "planner_platform"
+
 # === Меню ролей (кнопки + слэш-команды) ===
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update
 from telegram.ext import ContextTypes
@@ -870,6 +875,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["planner_data"].append(text.strip())  # [goal, platform, freq]
         session["state"] = "planner_face"
         await update.message.reply_text("👤 От чьего лица вести: личный / бренд / эксперт / команда?")
+        set_state(session, "planner_days")   # или две строки session["state"]=...; session["expect"]=...
         return
 
     # лицо → спрашиваем срок
