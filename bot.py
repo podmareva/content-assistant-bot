@@ -364,11 +364,9 @@ WELCOME = """👋 Привет! Ты в боте «Контент-ассисте
 • написать пост или Reels,
 • упаковать продукт.
 
-🔐 Чтобы начать, подтверди согласие с
-[Политикой конфиденциальности](https://docs.google.com/document/d/1UUyKq7aCbtrOT81VBVwgsOipjtWpro7v/edit)
-и [Договором‑офертой](https://docs.google.com/document/d/1zY2hl0ykUyDYGQbSygmcgY2JaVMMZjQL/edit).
+🔐 Чтобы начать,
 
-✅ Нажми «СОГЛАСЕН/СОГЛАСНА» — и поехали!
+✅ Нажми «СТАРТ» — и поехали!
 """
 
 # Порядок вопросов по базе
@@ -392,7 +390,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 WELCOME,
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
+                    [[InlineKeyboardButton("✅ СТАРТ", callback_data="agree")]]
                 ),
             )
             return
@@ -405,7 +403,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             WELCOME,
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("✅ СОГЛАСЕН/СОГЛАСНА", callback_data="agree")]]
+                [[InlineKeyboardButton("✅ СТАРТ", callback_data="agree")]]
             ),
         )
         return
