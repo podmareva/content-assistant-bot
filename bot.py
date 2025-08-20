@@ -596,15 +596,14 @@ _conn: psycopg.Connection | None = None
 def db_connect() -> psycopg.Connection:
     """Singleton-подключение с keepalive, autocommit и dict_row."""
     global _conn
-    if _conn is not None and not _conn.closed:
-        return _conn
-    _conn = psycopg.connect(
-        DATABASE_URL,
-        sslmode="require",
-        autocommit=True,
-        row_factory=dict_row,
-        keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5,
-    )
+    if _conn is None or _conn.closed:
+        _conn = psycopg.connect(
+            DATABASE_URL,
+            sslmode="require",
+            autocommit=True,
+            row_factory=dict_row,
+            keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5,
+        )
     return _conn
 
 def ensure_schema() -> None:
