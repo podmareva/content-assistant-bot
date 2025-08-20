@@ -42,14 +42,14 @@ async def send_long_text(chat_id: int, text: str, context, parse_mode=None):
 
 import time
 
-def openai_chat(messages, *, max_tokens=1600, temperature=0.8, attempts=3):
+def openai_chat(messages, *, max_completion_tokens=1600, temperature=0.8, attempts=3):
     last_err = None
     for i in range(1, attempts + 1):
         try:
             r = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_completion_tokens=max_completion_tokens,
                 messages=messages,
             )
             return r["choices"][0]["message"]["content"]
@@ -830,7 +830,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 response = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
-                    max_tokens=1500,
+                    max_completion_tokens=1500,
                     temperature=0.7,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -985,7 +985,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 tries += 1
                 try:
                     resp = openai.ChatCompletion.create(
-                        model=model, temperature=0.8, max_tokens=2200,
+                        model=model, temperature=0.8, max_completion_tokens=2200,
                         messages=[{"role": "user", "content": prompt}],
                         timeout=40,
                     )
@@ -1002,7 +1002,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             f"Вот что уже сгенерировано:\n{plan_full}"
                         )
                         cont = openai.ChatCompletion.create(
-                            model=model, temperature=0.8, max_tokens=1800,
+                            model=model, temperature=0.8, max_completion_tokens=1800,
                             messages=[{"role": "user", "content": cont_prompt}],
                             timeout=40,
                         )["choices"][0]["message"]["content"]
@@ -1021,7 +1021,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             f"Контекст (прошлые дни):\n{plan_full}"
                         )
                         day = openai.ChatCompletion.create(
-                            model=model, temperature=0.8, max_tokens=900,
+                            model=model, temperature=0.8, max_completion_tokens=900,
                             messages=[{"role": "user", "content": day_prompt}],
                             timeout=40,
                         )["choices"][0]["message"]["content"]
